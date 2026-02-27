@@ -1,4 +1,4 @@
-import { OPENAI_API_KEY, OPENAI_API_BASE } from '../config/api';
+import { CLAUDE_API_KEY, CLAUDE_API_BASE, CLAUDE_MODEL } from '../config/api';
 
 export async function generateFarmingPlan({ crop, farmAreaHectares, lat, lon, weatherSummary }) {
   const prompt = `You are an expert agricultural advisor for African farming. Generate a practical farming plan for:
@@ -21,25 +21,82 @@ Provide a concise plan with these sections:
 
 Keep advice practical and suited for small-to-medium African farmers. Be specific with numbers.`;
 
-  const response = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.6,
-      max_tokens: 1200,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error?.error?.message || 'AI plan generation failed. Check your OpenAI API key.');
+  if (!CLAUDE_API_KEY) {
+    throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY in .env.');
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const fallbackModels = [
+    CLAUDE_MODEL,
+    'claude-haiku-4-5-20251001',
+    'claude-sonnet-4-20250514',
+    'claude-sonnet-4-6',
+  ];
+  const modelsToTry = [...new Set(fallbackModels.filter(Boolean))];
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    let response;
+    try {
+      response = await fetch(`${CLAUDE_API_BASE}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.6,
+          max_tokens: 1200,
+        }),
+      });
+    } catch (error) {
+      throw new Error(`Network error while calling Claude: ${error?.message || 'request failed'}`);
+    }
+
+    if (!response.ok) {
+      let msg = `Claude API error (${response.status}) on model ${model}.`;
+      try {
+        const error = await response.json();
+        const apiMsg = error?.error?.message;
+        if (apiMsg) msg = `${msg} ${apiMsg}`;
+      } catch {
+        try {
+          const raw = await response.text();
+          if (raw?.trim()) msg = `${msg} ${raw.slice(0, 300)}`;
+        } catch {
+          // Ignore response parse failures.
+        }
+      }
+
+      lastError = msg;
+      const shouldTryNext = response.status === 404 && /model/i.test(msg);
+      if (shouldTryNext) continue;
+      throw new Error(msg);
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('Claude API returned an invalid JSON response.');
+    }
+
+    const text = Array.isArray(data?.content)
+      ? data.content
+          .filter((part) => part?.type === 'text' && typeof part?.text === 'string')
+          .map((part) => part.text)
+          .join('\n')
+          .trim()
+      : '';
+
+    if (!text) {
+      throw new Error(`Claude returned an empty response for model ${model}.`);
+    }
+
+    return text;
+  }
+
+  throw new Error(lastError || 'Claude API failed for all configured models.');
 }

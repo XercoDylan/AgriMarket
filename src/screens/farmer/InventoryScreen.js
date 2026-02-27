@@ -8,6 +8,11 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +40,9 @@ export default function InventoryScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [harvestingId, setHarvestingId] = useState(null);
   const [tab, setTab] = useState('growing'); // 'growing' | 'inventory'
+  const [showHarvestModal, setShowHarvestModal] = useState(false);
+  const [harvestTarget, setHarvestTarget] = useState(null);
+  const [harvestKg, setHarvestKg] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -45,7 +53,15 @@ export default function InventoryScreen({ navigation }) {
       setPlans(p.filter((x) => x.status === 'active'));
       setInventory(inv);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load data.');
+      let message = 'Failed to load data.';
+      if (error?.code === 'permission-denied') {
+        message = 'Firestore rules blocked this request. Update your Firebase rules for signed-in users.';
+      } else if (error?.code === 'failed-precondition') {
+        message = 'Firestore index is missing for this query. Create the suggested index in Firebase Console.';
+      } else if (error?.message) {
+        message = error.message;
+      }
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -65,35 +81,58 @@ export default function InventoryScreen({ navigation }) {
   };
 
   const handleHarvest = (plan) => {
+    setHarvestTarget(plan);
+    setHarvestKg(
+      plan?.estimatedYieldKg && Number.isFinite(Number(plan.estimatedYieldKg))
+        ? String(plan.estimatedYieldKg)
+        : ''
+    );
+    setShowHarvestModal(true);
+  };
+
+  const submitHarvest = async () => {
+    const plan = harvestTarget;
+    const qty = parseFloat(harvestKg);
+    if (!plan) return;
+    if (!qty || qty <= 0) {
+      Alert.alert('Invalid Quantity', 'Please enter harvested quantity in kg.');
+      return;
+    }
+
+    setHarvestingId(plan.id);
+    try {
+      await markPlanHarvested(plan.id);
+      await addToInventory(user.uid, {
+        cropType: plan.cropType,
+        cropName: plan.cropName,
+        cropEmoji: plan.cropEmoji,
+        quantity: qty,
+        unit: 'kg',
+        planId: plan.id,
+        harvestedAt: new Date().toISOString(),
+        farmerName: userProfile?.name || 'Farmer',
+      });
+      setShowHarvestModal(false);
+      setHarvestTarget(null);
+      setHarvestKg('');
+      Alert.alert('Added to Inventory!', `${plan.cropName} (${qty} kg) has been added to your inventory.`);
+      load();
+    } catch (err) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setHarvestingId(null);
+    }
+  };
+
+  const confirmHarvest = (plan) => {
     Alert.alert(
       'Mark as Harvested',
-      `Add your ${plan.cropName} harvest to inventory?`,
+      `Enter how many kg of ${plan.cropName} you harvested.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Add to Inventory',
-          onPress: async () => {
-            setHarvestingId(plan.id);
-            try {
-              await markPlanHarvested(plan.id);
-              await addToInventory(user.uid, {
-                cropType: plan.cropType,
-                cropName: plan.cropName,
-                cropEmoji: plan.cropEmoji,
-                quantity: plan.estimatedYieldKg || 0,
-                unit: 'kg',
-                planId: plan.id,
-                harvestedAt: new Date().toISOString(),
-                farmerName: userProfile?.name || 'Farmer',
-              });
-              Alert.alert('Added to Inventory!', `${plan.cropName} has been added to your inventory.`);
-              load();
-            } catch (err) {
-              Alert.alert('Error', err.message);
-            } finally {
-              setHarvestingId(null);
-            }
-          },
+          text: 'Continue',
+          onPress: () => handleHarvest(plan),
         },
       ]
     );
@@ -123,7 +162,7 @@ export default function InventoryScreen({ navigation }) {
         {item.status === 'active' && (
           <TouchableOpacity
             style={[styles.harvestBtn, isHarvesting && { opacity: 0.6 }]}
-            onPress={() => handleHarvest(item)}
+            onPress={() => confirmHarvest(item)}
             disabled={isHarvesting}
           >
             {isHarvesting ? (
@@ -222,6 +261,54 @@ export default function InventoryScreen({ navigation }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
         />
       )}
+
+      <Modal visible={showHarvestModal} animationType="slide" transparent onRequestClose={() => setShowHarvestModal(false)}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                Harvest Quantity {harvestTarget?.cropEmoji || '🌾'} {harvestTarget?.cropName || ''}
+              </Text>
+              <Text style={styles.modalSubtitle}>Enter the actual amount harvested in kilograms.</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={harvestKg}
+                onChangeText={setHarvestKg}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 125.5"
+                placeholderTextColor={colors.textMuted}
+                autoFocus
+              />
+              <TouchableOpacity onPress={Keyboard.dismiss} style={styles.keyboardDoneBtn}>
+                <Text style={styles.keyboardDoneText}>Done</Text>
+              </TouchableOpacity>
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalCancelBtn}
+                  onPress={() => {
+                    setShowHarvestModal(false);
+                    setHarvestTarget(null);
+                    setHarvestKg('');
+                  }}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalSaveBtn, harvestingId && { opacity: 0.7 }]}
+                  onPress={submitHarvest}
+                  disabled={!!harvestingId}
+                >
+                  {harvestingId ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.modalSaveText}>Save Harvest</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -284,4 +371,49 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 56, marginBottom: spacing.md },
   emptyTitle: { ...typography.h3, color: colors.textPrimary, textAlign: 'center', marginBottom: spacing.sm },
   emptySubtitle: { ...typography.body, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  modalTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: 4 },
+  modalSubtitle: { ...typography.body, color: colors.textMuted, marginBottom: spacing.md },
+  modalInput: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    height: 52,
+    paddingHorizontal: spacing.md,
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  keyboardDoneBtn: { alignSelf: 'flex-end', marginTop: spacing.sm },
+  keyboardDoneText: { color: colors.primary, fontWeight: '700' },
+  modalActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+  modalCancelBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  modalCancelText: { color: colors.textSecondary, fontWeight: '600' },
+  modalSaveBtn: {
+    flex: 2,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  modalSaveText: { color: '#fff', fontWeight: '700' },
 });

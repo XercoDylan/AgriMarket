@@ -6,12 +6,18 @@ import {
   updateDoc,
   query,
   where,
-  orderBy,
   serverTimestamp,
   getDoc,
   arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
+}
 
 // ─── Individual Listings ───────────────────────────────────────────────────
 
@@ -26,23 +32,19 @@ export async function createListing(farmerId, farmerName, listingData) {
 }
 
 export async function getActiveListings() {
-  const q = query(
-    collection(db, 'listings'),
-    where('status', '==', 'active'),
-    orderBy('createdAt', 'desc')
-  );
+  const q = query(collection(db, 'listings'), where('status', '==', 'active'));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 export async function getMyListings(farmerId) {
-  const q = query(
-    collection(db, 'listings'),
-    where('farmerId', '==', farmerId),
-    orderBy('createdAt', 'desc')
-  );
+  const q = query(collection(db, 'listings'), where('farmerId', '==', farmerId));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 export async function cancelListing(listingId) {
@@ -80,19 +82,19 @@ export async function createUnitSale(farmerId, farmerName, saleData) {
 }
 
 export async function getOpenUnitSales() {
-  const q = query(
-    collection(db, 'unit_sales'),
-    where('status', '==', 'open'),
-    orderBy('createdAt', 'desc')
-  );
+  const q = query(collection(db, 'unit_sales'), where('status', '==', 'open'));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 export async function getAllUnitSales() {
-  const q = query(collection(db, 'unit_sales'), orderBy('createdAt', 'desc'));
+  const q = query(collection(db, 'unit_sales'));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 export async function joinUnitSale(saleId, farmerId, farmerName, quantity, inventoryId) {
@@ -128,13 +130,11 @@ export async function buyUnitSale(saleId, buyerId, buyerName, quantity, pricePer
 // ─── Orders ───────────────────────────────────────────────────────────────
 
 export async function getMyOrders(buyerId) {
-  const q = query(
-    collection(db, 'orders'),
-    where('buyerId', '==', buyerId),
-    orderBy('createdAt', 'desc')
-  );
+  const q = query(collection(db, 'orders'), where('buyerId', '==', buyerId));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────
@@ -149,13 +149,11 @@ export async function addToInventory(farmerId, inventoryData) {
 }
 
 export async function getMyInventory(farmerId) {
-  const q = query(
-    collection(db, 'inventory'),
-    where('farmerId', '==', farmerId),
-    orderBy('createdAt', 'desc')
-  );
+  const q = query(collection(db, 'inventory'), where('farmerId', '==', farmerId));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 }
 
 export async function markInventoryListed(inventoryId) {

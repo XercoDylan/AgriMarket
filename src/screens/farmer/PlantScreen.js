@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { getWeatherData, formatWeatherSummary } from '../../services/weatherService';
 import { generateFarmingPlan } from '../../services/aiService';
-import { savePlantingPlan, calculateFarmArea } from '../../services/plantService';
+import { savePlantingPlan, calculateFarmArea, orderBoundaryPoints } from '../../services/plantService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 
 const { width } = Dimensions.get('window');
@@ -43,6 +43,39 @@ const CROPS = [
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
 
+function parsePlanSections(planText) {
+  if (!planText || typeof planText !== 'string') return [];
+
+  const lines = planText.replace(/\r/g, '').split('\n');
+  const sections = [];
+  let current = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const headingMatch =
+      line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*[–-]?\s*(.*)$/) ||
+      line.match(/^\d+\.\s*(.+?):\s*(.*)$/);
+
+    if (headingMatch) {
+      if (current) sections.push(current);
+      current = {
+        title: headingMatch[1].trim(),
+        content: headingMatch[2]?.trim() || '',
+      };
+      continue;
+    }
+
+    if (!current) {
+      current = { title: 'Plan Overview', content: line };
+    } else {
+      current.content = `${current.content}${current.content ? '\n' : ''}${line}`.trim();
+    }
+  }
+
+  if (current) sections.push(current);
+  return sections.filter((s) => s.content);
+}
+
 export default function PlantScreen() {
   const { user, userProfile } = useAuth();
   const mapRef = useRef(null);
@@ -62,7 +95,9 @@ export default function PlantScreen() {
     longitudeDelta: 0.02,
   });
 
-  const farmArea = calculateFarmArea(farmBoundary);
+  const orderedBoundary = orderBoundaryPoints(farmBoundary);
+  const farmArea = calculateFarmArea(orderedBoundary);
+  const planSections = parsePlanSections(aiPlan);
   const farmCenter =
     farmBoundary.length > 0
       ? {
@@ -137,9 +172,14 @@ export default function PlantScreen() {
       });
       setAiPlan(plan);
     } catch (error) {
+      const message =
+        typeof error === 'string'
+          ? error
+          : error?.message || 'Could not generate plan. Verify Claude API key, model, and internet connection.';
+      console.error('Plan generation error:', error);
       Alert.alert(
         'Plan Generation Failed',
-        error.message || 'Could not generate plan. Check your OpenAI API key in src/config/api.js.',
+        message,
         [{ text: 'OK', onPress: () => setStep(1) }]
       );
     } finally {
@@ -155,7 +195,7 @@ export default function PlantScreen() {
         cropType: selectedCrop.id,
         cropName: selectedCrop.name,
         cropEmoji: selectedCrop.emoji,
-        farmBoundary,
+        farmBoundary: orderedBoundary,
         farmAreaHectares: farmArea,
         centerLat: farmCenter?.lat || region.latitude,
         centerLon: farmCenter?.lon || region.longitude,
@@ -238,9 +278,9 @@ export default function PlantScreen() {
               </View>
             </Marker>
           ))}
-          {farmBoundary.length >= 3 && (
+          {orderedBoundary.length >= 3 && (
             <Polygon
-              coordinates={farmBoundary}
+              coordinates={orderedBoundary}
               fillColor="rgba(46,125,50,0.2)"
               strokeColor={colors.primary}
               strokeWidth={2}
@@ -364,9 +404,21 @@ export default function PlantScreen() {
             </View>
 
             {/* AI Plan text */}
-            <View style={styles.planCard}>
-              <Text style={styles.planText}>{aiPlan}</Text>
-            </View>
+            {planSections.length > 0 ? (
+              planSections.map((section, idx) => (
+                <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionIndex}>{idx + 1}</Text>
+                    <Text style={styles.sectionTitle}>{section.title}</Text>
+                  </View>
+                  <Text style={styles.sectionBody}>{section.content}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.planCard}>
+                <Text style={styles.planText}>{aiPlan}</Text>
+              </View>
+            )}
 
             <View style={[styles.stepFooter, { paddingHorizontal: 0 }]}>
               <TouchableOpacity style={styles.backBtn} onPress={() => setStep(1)}>
@@ -406,7 +458,11 @@ export default function PlantScreen() {
 
         <View style={[styles.planCard, { maxHeight: 200 }]}>
           <Text style={[styles.planText, { fontSize: 13 }]} numberOfLines={10}>
-            {aiPlan}
+            {planSections.length > 0
+              ? planSections
+                  .map((s, i) => `${i + 1}. ${s.title}: ${s.content}`)
+                  .join('\n\n')
+              : aiPlan}
           </Text>
         </View>
 
@@ -616,6 +672,31 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   planText: { fontSize: 14, color: colors.textPrimary, lineHeight: 22 },
+  sectionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.sm,
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
+  sectionIndex: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    color: '#fff',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    fontSize: 12,
+    fontWeight: '800',
+    marginRight: spacing.sm,
+    overflow: 'hidden',
+  },
+  sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
+  sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
 
   reviewCard: {
     backgroundColor: colors.surface,

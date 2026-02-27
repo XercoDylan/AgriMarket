@@ -11,6 +11,7 @@ import {
   TextInput,
   ScrollView,
   RefreshControl,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -327,6 +328,7 @@ export default function FarmerJobsScreen() {
 }
 
 function FormInput({ label, value, onChangeText, placeholder, keyboardType, multiline }) {
+  const isNumeric = keyboardType === 'numeric' || keyboardType === 'decimal-pad' || keyboardType === 'number-pad';
   return (
     <View style={{ marginBottom: spacing.md }}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -349,7 +351,15 @@ function FormInput({ label, value, onChangeText, placeholder, keyboardType, mult
         placeholderTextColor={colors.textMuted}
         keyboardType={keyboardType}
         multiline={multiline}
+        returnKeyType={multiline ? 'default' : 'done'}
+        blurOnSubmit={!multiline}
+        onSubmitEditing={Keyboard.dismiss}
       />
+      {isNumeric && (
+        <TouchableOpacity onPress={Keyboard.dismiss} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+          <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Done</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

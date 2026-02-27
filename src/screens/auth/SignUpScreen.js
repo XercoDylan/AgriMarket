@@ -44,11 +44,15 @@ export default function SignUpScreen({ navigation }) {
     } catch (error) {
       let msg = 'Registration failed. Please try again.';
       if (error.code === 'auth/email-already-in-use') {
-        msg = 'This email is already registered.';
+        msg = 'This email already exists in the Firebase project configured in your .env.';
       } else if (error.code === 'auth/invalid-email') {
         msg = 'Please enter a valid email address.';
+      } else if (error.code === 'auth/operation-not-allowed') {
+        msg = 'Email/Password sign-up is disabled in Firebase Console. Enable it in Authentication -> Sign-in method.';
       } else if (error.code === 'auth/weak-password') {
         msg = 'Password must be at least 6 characters.';
+      } else if (error?.message) {
+        msg = error.message;
       }
       Alert.alert('Sign Up Failed', msg);
     } finally {
