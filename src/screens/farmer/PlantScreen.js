@@ -8,6 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Animated,
+  Easing,
 } from 'react-native';
 import MapView, { Marker, Polygon } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -42,8 +44,118 @@ const CROPS = [
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
 
+function sanitizePlainText(value) {
+  if (!value) return '';
+  return String(value)
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .replace(/`+/g, '')
+    .replace(/[^\x20-\x7E\n]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function safeJsonParse(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function extractLikelyJson(text) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+
+  const direct = safeJsonParse(trimmed);
+  if (direct) return direct;
+
+  const fenced = trimmed.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    const parsed = safeJsonParse(fenced[1].trim());
+    if (parsed) return parsed;
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+    const parsed = safeJsonParse(candidate);
+    if (parsed) return parsed;
+
+    // Last-pass cleanup for trailing commas from imperfect model output.
+    const loosened = candidate.replace(/,\s*([}\]])/g, '$1');
+    const parsedLoosened = safeJsonParse(loosened);
+    if (parsedLoosened) return parsedLoosened;
+  }
+
+  return null;
+}
+
+function parseStructuredPlan(planText) {
+  if (!planText || typeof planText !== 'string') return null;
+  const raw = extractLikelyJson(planText);
+  if (!raw) return null;
+
+  try {
+    if (!Array.isArray(raw?.steps) || raw.steps.length === 0) return null;
+
+    const steps = raw.steps
+      .map((step, stepIdx) => {
+        const actions = Array.isArray(step?.actions)
+          ? step.actions
+              .map((action, actionIdx) => ({
+                id: `${stepIdx}-${actionIdx}`,
+                task: sanitizePlainText(action?.task),
+                why: sanitizePlainText(action?.why),
+                when: sanitizePlainText(action?.when),
+                warning: sanitizePlainText(action?.warning),
+              }))
+              .filter((a) => a.task)
+          : [];
+
+        return {
+          title: sanitizePlainText(step?.title) || `Step ${stepIdx + 1}`,
+          phase: sanitizePlainText(step?.phase).toLowerCase(),
+          startDay: Number.isFinite(Number(step?.start_day)) ? Number(step.start_day) : null,
+          endDay: Number.isFinite(Number(step?.end_day)) ? Number(step.end_day) : null,
+          priority: sanitizePlainText(step?.priority).toLowerCase() || 'medium',
+          reason: sanitizePlainText(step?.reason),
+          actions,
+        };
+      })
+      .filter((s) => s.actions.length > 0);
+
+    if (steps.length === 0) return null;
+
+    const alerts = Array.isArray(raw?.alerts)
+      ? raw.alerts
+          .map((a) => ({
+            title: sanitizePlainText(a?.title),
+            message: sanitizePlainText(a?.message),
+            severity: sanitizePlainText(a?.severity).toLowerCase() || 'info',
+          }))
+          .filter((a) => a.title || a.message)
+      : [];
+
+    return {
+      summary: {
+        objective: sanitizePlainText(raw?.summary?.objective),
+        keyDecision: sanitizePlainText(raw?.summary?.key_decision),
+      },
+      alerts,
+      steps,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parsePlanSections(planText) {
   if (!planText || typeof planText !== 'string') return [];
+  // If response looks like JSON but failed structured parse, don't render broken JSON tokens as tasks.
+  if (/"summary"\s*:/.test(planText) && /"steps"\s*:/.test(planText)) return [];
 
   const lines = planText.replace(/\r/g, '').split('\n');
   const sections = [];
@@ -52,6 +164,12 @@ function parsePlanSections(planText) {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
+    const isJsonNoise =
+      /^```/.test(line) ||
+      /^[{}\[\],]+$/.test(line) ||
+      /^"[\w-]+"\s*:\s*[\[{]?$/.test(line) ||
+      /^"[\w-]+"\s*:\s*.+,?$/.test(line);
+    if (isJsonNoise) continue;
 
     const headingMatch =
       line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*-?\s*(.*)$/) ||
@@ -91,12 +209,14 @@ function parsePlanSections(planText) {
 
       const fallbackActions = section.content
         .split(/\n|;\s+|\.\s+/)
-        .map((s) => s.trim())
+        .map((s) => sanitizePlainText(s))
         .filter((s) => s.length >= 8)
         .slice(0, 3);
 
       return {
         ...section,
+        title: sanitizePlainText(section.title),
+        content: sanitizePlainText(section.content),
         actionItems: fallbackActions,
       };
     })
@@ -123,9 +243,18 @@ export default function PlantScreen() {
 
   const orderedBoundary = orderBoundaryPoints(farmBoundary);
   const farmArea = calculateFarmArea(orderedBoundary);
-  const planSections = parsePlanSections(aiPlan);
+  const structuredPlan = parseStructuredPlan(aiPlan);
+  const planSections = structuredPlan
+    ? structuredPlan.steps.map((step) => ({
+        title: step.title,
+        content: step.reason,
+        actionItems: step.actions.map((a) => a.task),
+      }))
+    : parsePlanSections(aiPlan);
   const [completedActions, setCompletedActions] = useState({});
-  const [expandedSections, setExpandedSections] = useState({});
+  const [currentTaskIdx, setCurrentTaskIdx] = useState(0);
+  const taskOpacity = useRef(new Animated.Value(1)).current;
+  const taskTranslateY = useRef(new Animated.Value(0)).current;
 
   const farmCenter =
     farmBoundary.length > 0
@@ -136,13 +265,8 @@ export default function PlantScreen() {
       : null;
 
   useEffect(() => {
-    if (planSections.length > 0) {
-      setCompletedActions({});
-      setExpandedSections({ 0: true });
-      return;
-    }
     setCompletedActions({});
-    setExpandedSections({});
+    setCurrentTaskIdx(0);
   }, [aiPlan]);
 
   const getActionKey = (sectionIdx, actionIdx) => `${sectionIdx}-${actionIdx}`;
@@ -156,14 +280,76 @@ export default function PlantScreen() {
     (sum, section, sectionIdx) => sum + getCompletedActionsForSection(section, sectionIdx),
     0
   );
-  const progressPercent = totalActionCount > 0 ? Math.round((completedActionCount / totalActionCount) * 100) : 0;
-  const nextIncompleteSectionIdx = planSections.findIndex((section, idx) => !isSectionCompleted(section, idx));
   const getSectionTip = (section) => {
     const source = section?.content?.trim();
     if (!source) return null;
     const firstSentence = source.split(/(?<=[.!?])\s+/)[0]?.trim() || source;
     return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
   };
+  const walkthroughTasks = structuredPlan
+    ? structuredPlan.steps.flatMap((step, sectionIdx) =>
+        step.actions.map((action, actionIdx) => ({
+          text: action.task,
+          why: action.why,
+          when: action.when,
+          warning: action.warning,
+          sectionIdx,
+          actionIdx,
+          sectionTitle: step.title,
+          tip: step.reason || action.why,
+          priority: step.priority || 'medium',
+          phase: step.phase || 'planting',
+          dayWindow:
+            Number.isFinite(step.startDay) && Number.isFinite(step.endDay)
+              ? `Day ${step.startDay}-${step.endDay}`
+              : action.when || 'Schedule as advised',
+        }))
+      )
+    : planSections.flatMap((section, sectionIdx) =>
+        section.actionItems.map((text, actionIdx) => ({
+          text,
+          why: '',
+          when: '',
+          warning: '',
+          sectionIdx,
+          actionIdx,
+          sectionTitle: section.title,
+          tip: getSectionTip(section),
+          priority: 'medium',
+          phase: 'planting',
+          dayWindow: 'Follow recommended timing',
+        }))
+      );
+  const totalTaskCount = walkthroughTasks.length;
+  const boundedTaskIdx = totalTaskCount > 0 ? Math.min(currentTaskIdx, totalTaskCount - 1) : 0;
+  const currentTask = totalTaskCount > 0 ? walkthroughTasks[boundedTaskIdx] : null;
+  const progressPercent = totalActionCount > 0 ? Math.round((completedActionCount / totalActionCount) * 100) : 0;
+  useEffect(() => {
+    if (totalTaskCount === 0) return;
+    if (currentTaskIdx > totalTaskCount - 1) {
+      setCurrentTaskIdx(totalTaskCount - 1);
+    }
+  }, [currentTaskIdx, totalTaskCount]);
+
+  useEffect(() => {
+    if (!currentTask) return;
+    taskOpacity.setValue(0);
+    taskTranslateY.setValue(16);
+    Animated.parallel([
+      Animated.timing(taskOpacity, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(taskTranslateY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [boundedTaskIdx]);
 
   // Fit map to show all boundary points so the last numbered corner is visible.
   // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
@@ -450,6 +636,62 @@ export default function PlantScreen() {
 
   // Step 2: AI Plan
   if (step === 2) {
+    const goToTask = (nextIdx) => {
+      if (totalTaskCount === 0) return;
+      const bounded = Math.max(0, Math.min(nextIdx, totalTaskCount - 1));
+      setCurrentTaskIdx(bounded);
+    };
+
+    const isCurrentTaskDone = currentTask
+      ? !!completedActions[getActionKey(currentTask.sectionIdx, currentTask.actionIdx)]
+      : false;
+
+    const toggleCurrentTask = () => {
+      if (!currentTask) return;
+      const key = getActionKey(currentTask.sectionIdx, currentTask.actionIdx);
+      const wasChecked = !!completedActions[key];
+      setCompletedActions((prev) => ({ ...prev, [key]: !prev[key] }));
+      if (!wasChecked && boundedTaskIdx < totalTaskCount - 1) {
+        setTimeout(() => goToTask(boundedTaskIdx + 1), 180);
+      }
+    };
+
+    const completeAndAdvance = () => {
+      if (!currentTask) return;
+      const key = getActionKey(currentTask.sectionIdx, currentTask.actionIdx);
+      setCompletedActions((prev) => ({ ...prev, [key]: true }));
+      if (boundedTaskIdx < totalTaskCount - 1) {
+        goToTask(boundedTaskIdx + 1);
+      }
+    };
+    const alertItems = structuredPlan?.alerts || [];
+    const phaseIconMap = {
+      soil: 'earth-outline',
+      planting: 'leaf-outline',
+      water: 'water-outline',
+      fertilizer: 'flask-outline',
+      protection: 'shield-checkmark-outline',
+      harvest: 'nutrition-outline',
+    };
+    const phaseIcon = currentTask ? phaseIconMap[currentTask.phase] || 'leaf-outline' : 'leaf-outline';
+    const priorityStyleMap = {
+      low: { bg: '#E8F5E9', text: colors.primaryDark, label: 'Low Priority' },
+      medium: { bg: '#FFF8E1', text: colors.warning, label: 'Medium Priority' },
+      high: { bg: '#FFEBEE', text: colors.error, label: 'High Priority' },
+    };
+    const priorityMeta = currentTask ? priorityStyleMap[currentTask.priority] || priorityStyleMap.medium : priorityStyleMap.medium;
+    const activeLat = farmCenter?.lat || region.latitude;
+    const activeLon = farmCenter?.lon || region.longitude;
+    const areaBand =
+      farmArea < 0.5 ? 'Small Plot' : farmArea < 2 ? 'Medium Plot' : 'Large Plot';
+    const currentWeatherSummary = weather ? formatWeatherSummary(weather) : 'Weather data unavailable';
+    const weatherImpact =
+      /rain|storm|showers/i.test(currentWeatherSummary)
+        ? 'Water carefully, avoid oversaturation.'
+        : /hot|heat|sun/i.test(currentWeatherSummary)
+          ? 'Increase moisture retention and mulch.'
+          : 'Maintain normal irrigation cadence.';
+
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <StepIndicator />
@@ -481,152 +723,156 @@ export default function PlantScreen() {
                 </View>
               )}
             </View>
+            {structuredPlan?.summary?.objective ? (
+              <View style={styles.decisionCard}>
+                <Text style={styles.decisionTitle}>AI Decision</Text>
+                <Text style={styles.decisionBody}>{structuredPlan.summary.objective}</Text>
+                {structuredPlan?.summary?.keyDecision ? (
+                  <Text style={styles.decisionKey}>Key call: {structuredPlan.summary.keyDecision}</Text>
+                ) : null}
+              </View>
+            ) : null}
+            <View style={styles.regionCard}>
+              <Text style={styles.regionTitle}>Region Insights</Text>
+              <View style={styles.regionRow}>
+                <View style={styles.regionPill}>
+                  <Ionicons name="locate-outline" size={14} color={colors.primaryDark} />
+                  <Text style={styles.regionPillText}>{activeLat.toFixed(3)}, {activeLon.toFixed(3)}</Text>
+                </View>
+                <View style={styles.regionPill}>
+                  <Ionicons name="map-outline" size={14} color={colors.primaryDark} />
+                  <Text style={styles.regionPillText}>{areaBand}</Text>
+                </View>
+              </View>
+              <Text style={styles.regionHint}>{weatherImpact}</Text>
+            </View>
 
-            {/* Interactive AI plan */}
-            {planSections.length > 0 ? (
-<<<<<<< HEAD
+            {/* Guided walkthrough */}
+            {totalTaskCount > 0 ? (
               <>
                 <View style={styles.progressCard}>
                   <View style={styles.progressHeader}>
-                    <Text style={styles.progressTitle}>Plan Progress</Text>
+                    <Text style={styles.progressTitle}>Guided Walkthrough</Text>
                     <Text style={styles.progressMeta}>
-                      {completedActionCount}/{totalActionCount} tasks complete
+                      {completedActionCount}/{totalActionCount} done
                     </Text>
-=======
-              planSections.map((section, idx) => (
-                <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionIndexCircle}>
-                      <Text style={styles.sectionIndexText}>{idx + 1}</Text>
-                    </View>
-                    <Text style={styles.sectionTitle}>{section.title}</Text>
->>>>>>> 110819eed8d562189b7d2893abeb1777c963b73f
                   </View>
                   <View style={styles.progressTrack}>
                     <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
                   </View>
                   <Text style={styles.progressSubtitle}>
-                    {progressPercent === 100
-                      ? 'All action items completed. You can save this plan.'
-                      : `Complete the checklist below to stay on track (${progressPercent}%).`}
+                    Task {boundedTaskIdx + 1} of {totalTaskCount}
                   </Text>
-                  {nextIncompleteSectionIdx >= 0 && (
-                    <TouchableOpacity
-                      style={styles.jumpBtn}
-                      onPress={() =>
-                        setExpandedSections((prev) => ({ ...prev, [nextIncompleteSectionIdx]: true }))
-                      }
-                    >
-                      <Ionicons name="navigate" size={15} color={colors.info} />
-                      <Text style={styles.jumpBtnText}>
-                        Focus next step: {nextIncompleteSectionIdx + 1}. {planSections[nextIncompleteSectionIdx].title}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  <View style={styles.dotRow}>
+                    {walkthroughTasks.slice(0, 16).map((_, idx) => (
+                      <View
+                        key={`dot-${idx}`}
+                        style={[
+                          styles.dot,
+                          idx === boundedTaskIdx && styles.dotActive,
+                          idx < boundedTaskIdx && styles.dotDone,
+                        ]}
+                      />
+                    ))}
+                  </View>
                 </View>
 
-                {planSections.map((section, idx) => {
-                  const completedInSection = getCompletedActionsForSection(section, idx);
-                  const done = isSectionCompleted(section, idx);
-                  const isExpanded = !!expandedSections[idx];
+                {alertItems.length > 0 && (
+                  <View style={styles.alertCard}>
+                    <Ionicons name="alert-circle-outline" size={16} color={colors.warning} />
+                    <Text style={styles.alertText}>
+                      {alertItems[0].title}: {alertItems[0].message}
+                    </Text>
+                  </View>
+                )}
 
-                  const toggleAction = (actionIdx) => {
-                    setCompletedActions((prev) => {
-                      const key = getActionKey(idx, actionIdx);
-                      return { ...prev, [key]: !prev[key] };
-                    });
-                  };
+                {currentTask && (
+                  <Animated.View
+                    style={[
+                      styles.walkCard,
+                      {
+                        opacity: taskOpacity,
+                        transform: [{ translateY: taskTranslateY }],
+                      },
+                    ]}
+                  >
+                    <View style={styles.walkHeader}>
+                      <View style={styles.walkStepBadge}>
+                        <Text style={styles.walkStepBadgeText}>{currentTask.sectionIdx + 1}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.walkTitle}>{currentTask.sectionTitle}</Text>
+                        <Text style={styles.walkMeta}>One action at a time</Text>
+                      </View>
+                      <Ionicons name={phaseIcon} size={20} color={colors.primaryDark} />
+                    </View>
 
-                  const markStepDone = () => {
-                    setCompletedActions((prev) => {
-                      const next = { ...prev };
-                      section.actionItems.forEach((_, actionIdx) => {
-                        next[getActionKey(idx, actionIdx)] = true;
-                      });
-                      return next;
-                    });
-                  };
+                    <View style={styles.metaRow}>
+                      <View style={styles.metaChip}>
+                        <Ionicons name="calendar-outline" size={14} color={colors.info} />
+                        <Text style={styles.metaChipText}>{currentTask.dayWindow}</Text>
+                      </View>
+                      <View style={[styles.metaChip, { backgroundColor: priorityMeta.bg }]}>
+                        <Ionicons name="flag-outline" size={14} color={priorityMeta.text} />
+                        <Text style={[styles.metaChipText, { color: priorityMeta.text }]}>
+                          {priorityMeta.label}
+                        </Text>
+                      </View>
+                    </View>
 
-                  const goNextStep = () => {
-                    if (idx >= planSections.length - 1) return;
-                    setExpandedSections((prev) => ({ ...prev, [idx + 1]: true }));
-                  };
+                    {currentTask.tip ? <Text style={styles.walkTip}>Tip: {currentTask.tip}</Text> : null}
+                    {currentTask.why ? (
+                      <View style={styles.whyCard}>
+                        <Text style={styles.whyTitle}>Why this matters</Text>
+                        <Text style={styles.whyText}>{currentTask.why}</Text>
+                      </View>
+                    ) : null}
+                    {currentTask.warning ? (
+                      <View style={styles.warnCard}>
+                        <Ionicons name="warning-outline" size={16} color={colors.error} />
+                        <Text style={styles.warnText}>{currentTask.warning}</Text>
+                      </View>
+                    ) : null}
 
-                  return (
-                    <View
-                      key={`${section.title}-${idx}`}
-                      style={[styles.sectionCard, done && styles.sectionCardCompleted]}
+                    <TouchableOpacity
+                      style={[styles.taskRow, isCurrentTaskDone && styles.taskRowDone]}
+                      onPress={toggleCurrentTask}
+                      activeOpacity={0.85}
                     >
+                      <Ionicons
+                        name={isCurrentTaskDone ? 'checkbox' : 'square-outline'}
+                        size={22}
+                        color={isCurrentTaskDone ? colors.primary : colors.textMuted}
+                        style={{ marginRight: spacing.sm }}
+                      />
+                      <Text style={[styles.taskText, isCurrentTaskDone && styles.taskTextDone]}>
+                        {currentTask.text}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.walkActions}>
                       <TouchableOpacity
-                        style={styles.sectionHeader}
-                        onPress={() =>
-                          setExpandedSections((prev) => ({ ...prev, [idx]: !prev[idx] }))
-                        }
+                        style={[styles.walkBtn, boundedTaskIdx === 0 && styles.walkBtnDisabled]}
+                        onPress={() => goToTask(boundedTaskIdx - 1)}
+                        disabled={boundedTaskIdx === 0}
                       >
-                        <Text style={styles.sectionIndex}>{idx + 1}</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.sectionTitle}>{section.title}</Text>
-                          <Text style={styles.sectionMeta}>
-                            {completedInSection}/{section.actionItems.length} completed
-                          </Text>
-                        </View>
-                        {done && (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={18}
-                            color={colors.primary}
-                            style={{ marginRight: 6 }}
-                          />
-                        )}
-                        <Ionicons
-                          name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                          size={18}
-                          color={colors.textMuted}
-                        />
+                        <Ionicons name="arrow-back" size={16} color={colors.primaryDark} />
+                        <Text style={styles.walkBtnText}>Previous</Text>
                       </TouchableOpacity>
 
-                      {isExpanded && (
-                        <View>
-                          {getSectionTip(section) ? (
-                            <Text style={styles.sectionBody}>Tip: {getSectionTip(section)}</Text>
-                          ) : null}
-
-                          {section.actionItems.map((item, actionIdx) => {
-                            const checked = !!completedActions[getActionKey(idx, actionIdx)];
-                            return (
-                              <TouchableOpacity
-                                key={`${idx}-action-${actionIdx}`}
-                                style={styles.actionRow}
-                                onPress={() => toggleAction(actionIdx)}
-                              >
-                                <Ionicons
-                                  name={checked ? 'checkbox' : 'square-outline'}
-                                  size={20}
-                                  color={checked ? colors.primary : colors.textMuted}
-                                  style={{ marginRight: spacing.sm }}
-                                />
-                                <Text style={[styles.actionText, checked && styles.actionTextDone]}>{item}</Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-
-                          <View style={styles.sectionActions}>
-                            <TouchableOpacity style={styles.sectionBtn} onPress={markStepDone}>
-                              <Ionicons name="checkmark-done" size={16} color={colors.primary} />
-                              <Text style={styles.sectionBtnText}>Mark Step Done</Text>
-                            </TouchableOpacity>
-                            {idx < planSections.length - 1 && (
-                              <TouchableOpacity style={styles.sectionBtn} onPress={goNextStep}>
-                                <Ionicons name="arrow-forward" size={16} color={colors.primary} />
-                                <Text style={styles.sectionBtnText}>Next Step</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        </View>
-                      )}
+                      <TouchableOpacity style={styles.walkNextBtn} onPress={completeAndAdvance}>
+                        <Text style={styles.walkNextBtnText}>
+                          {boundedTaskIdx === totalTaskCount - 1 ? 'Complete Task' : 'Complete & Next'}
+                        </Text>
+                        <Ionicons
+                          name={boundedTaskIdx === totalTaskCount - 1 ? 'checkmark' : 'arrow-forward'}
+                          size={16}
+                          color="#fff"
+                        />
+                      </TouchableOpacity>
                     </View>
-                  );
-                })}
+                  </Animated.View>
+                )}
               </>
             ) : (
               <View style={styles.planCard}>
@@ -910,19 +1156,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
-  jumpBtn: {
-    marginTop: spacing.sm,
+  dotRow: { flexDirection: 'row', marginTop: spacing.sm, gap: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border },
+  dotActive: { backgroundColor: colors.primary, width: 14 },
+  dotDone: { backgroundColor: colors.primaryLight },
+  alertCard: {
+    marginBottom: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFF8E1',
+    borderWidth: 1,
+    borderColor: '#FFE082',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  alertText: { flex: 1, color: colors.earth, fontSize: 12, lineHeight: 18 },
+  decisionCard: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.info,
+  },
+  decisionTitle: { fontSize: 12, fontWeight: '700', color: colors.info, marginBottom: 2 },
+  decisionBody: { fontSize: 13, color: colors.textPrimary, lineHeight: 19 },
+  decisionKey: { fontSize: 12, color: colors.textSecondary, marginTop: 6 },
+  regionCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+  },
+  regionTitle: { fontSize: 12, fontWeight: '700', color: colors.primaryDark, marginBottom: spacing.xs },
+  regionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  regionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: '#E3F2FD',
+    gap: 5,
+    backgroundColor: '#F1F8F1',
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
+    paddingVertical: 5,
   },
-  jumpBtnText: { fontSize: 12, color: colors.info, fontWeight: '700' },
-
+  regionPillText: { fontSize: 12, color: colors.primaryDark, fontWeight: '600' },
+  regionHint: { marginTop: spacing.xs, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
   planCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
@@ -931,22 +1213,17 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   planText: { fontSize: 14, color: colors.textPrimary, lineHeight: 22 },
-  sectionCard: {
+  walkCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.primaryLighter,
     ...shadow.sm,
   },
-<<<<<<< HEAD
-  sectionHeader: { flexDirection: 'row', alignItems: 'center' },
-  sectionIndex: {
-=======
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  sectionIndexCircle: {
->>>>>>> 110819eed8d562189b7d2893abeb1777c963b73f
+  walkHeader: { flexDirection: 'row', alignItems: 'center' },
+  walkStepBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -955,37 +1232,91 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: spacing.sm,
   },
-  sectionIndexText: {
+  walkStepBadgeText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '800',
   },
-  sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
-  sectionMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21, marginTop: spacing.sm },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: spacing.sm,
-  },
-  actionText: { flex: 1, fontSize: 13, color: colors.textPrimary, lineHeight: 20 },
-  actionTextDone: { textDecorationLine: 'line-through', color: colors.textMuted },
-  sectionActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' },
-  sectionBtn: {
+  walkTitle: { ...typography.h4, color: colors.textPrimary },
+  walkMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  walkTip: { fontSize: 13, color: colors.textSecondary, lineHeight: 20, marginTop: spacing.sm },
+  metaRow: { flexDirection: 'row', gap: 8, marginTop: spacing.sm, flexWrap: 'wrap' },
+  metaChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.primaryLighter,
+    gap: 5,
+    backgroundColor: '#E3F2FD',
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
+    paddingVertical: 5,
+  },
+  metaChipText: { fontSize: 12, color: colors.info, fontWeight: '600' },
+  whyCard: {
+    marginTop: spacing.sm,
+    backgroundColor: '#F5F5F0',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.info,
+  },
+  whyTitle: { fontSize: 12, color: colors.info, fontWeight: '700', marginBottom: 2 },
+  whyText: { fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
+  warnCard: {
+    marginTop: spacing.sm,
+    backgroundColor: '#FFEBEE',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  warnText: { flex: 1, fontSize: 12, color: colors.error, lineHeight: 18 },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FAFAFA',
+  },
+  taskRowDone: {
+    backgroundColor: '#E8F5E9',
+    borderColor: colors.primaryLighter,
+  },
+  taskText: { flex: 1, fontSize: 14, color: colors.textPrimary, lineHeight: 21 },
+  taskTextDone: { textDecorationLine: 'line-through', color: colors.textMuted },
+  walkActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  walkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
     gap: 4,
     backgroundColor: '#F1F8F1',
+    minWidth: 120,
   },
-  sectionBtnText: { fontSize: 12, color: colors.primaryDark, fontWeight: '700' },
-  sectionCardCompleted: {
-    backgroundColor: '#F8FFF8',
+  walkBtnDisabled: { opacity: 0.45 },
+  walkBtnText: { fontSize: 13, color: colors.primaryDark, fontWeight: '700' },
+  walkNextBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    gap: 4,
+    backgroundColor: colors.primary,
   },
+  walkNextBtnText: { fontSize: 13, color: '#fff', fontWeight: '700' },
 
   reviewCard: {
     backgroundColor: colors.surface,
