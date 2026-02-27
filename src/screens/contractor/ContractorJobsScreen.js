@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { getOpenJobs, applyForJob } from '../../services/jobService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
+import { formatPrice } from '../../config/currencies';
 
 const TASK_ICONS = {
   planting: '🌱', harvesting: '🌾', irrigation: '💧',
@@ -120,7 +121,7 @@ export default function ContractorJobsScreen() {
 
         <View style={styles.infoGrid}>
           <InfoChip icon="location-outline" text={item.location} />
-          <InfoChip icon="cash-outline" text={`GH₵${item.pay}/${item.payPeriod?.replace('_', ' ')}`} />
+          <InfoChip icon="cash-outline" text={`${formatPrice(item.pay, userProfile?.currency)}/${item.payPeriod?.replace('_', ' ')}`} />
           {item.cropType ? <InfoChip icon="leaf-outline" text={item.cropType} /> : null}
           {item.duration ? <InfoChip icon="time-outline" text={item.duration} /> : null}
         </View>

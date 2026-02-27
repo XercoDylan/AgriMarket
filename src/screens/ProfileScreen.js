@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, borderRadius, typography } from '../config/theme';
+import { formatCurrencyLabel } from '../config/currencies';
 
 export default function ProfileScreen() {
   const { user, userProfile, logout } = useAuth();
@@ -30,6 +31,8 @@ export default function ProfileScreen() {
         <Text style={styles.value}>{user?.email ?? '—'}</Text>
         <Text style={styles.label}>Role</Text>
         <Text style={styles.value}>{roleLabel}</Text>
+        <Text style={styles.label}>Currency</Text>
+        <Text style={styles.value}>{formatCurrencyLabel(userProfile?.currency)}</Text>
       </View>
 
       <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} activeOpacity={0.8}>

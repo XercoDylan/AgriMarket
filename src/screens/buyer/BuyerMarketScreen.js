@@ -26,6 +26,7 @@ import {
   getMyOrders,
 } from '../../services/marketService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
+import { formatPrice } from '../../config/currencies';
 
 const CROP_FILTERS = ['All', 'Maize', 'Rice', 'Tomato', 'Cassava', 'Yam', 'Onion', 'Pepper', 'Groundnut'];
 
@@ -109,7 +110,7 @@ export default function BuyerMarketScreen() {
 
     Alert.alert(
       'Confirm Purchase',
-      `Buy ${qty} ${type === 'listing' ? item.unit : 'kg'} of ${type === 'listing' ? item.cropName : item.cropType} for GH₵${totalPrice.toFixed(2)}?`,
+      `Buy ${qty} ${type === 'listing' ? item.unit : 'kg'} of ${type === 'listing' ? item.cropName : item.cropType} for ${formatPrice(totalPrice, userProfile?.currency)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -145,7 +146,7 @@ export default function BuyerMarketScreen() {
           <Text style={styles.sellerName}>Sold by {item.farmerName}</Text>
         </View>
         <View style={styles.priceTag}>
-          <Text style={styles.priceText}>GH₵{item.pricePerUnit}</Text>
+          <Text style={styles.priceText}>{formatPrice(item.pricePerUnit, userProfile?.currency)}</Text>
           <Text style={styles.priceUnit}>/{item.unit}</Text>
         </View>
       </View>
@@ -172,7 +173,7 @@ export default function BuyerMarketScreen() {
             <Text style={styles.sellerName}>{item.contributors?.length || 1} farmer(s) contributing</Text>
           </View>
           <View style={styles.priceTag}>
-            <Text style={styles.priceText}>GH₵{item.pricePerUnit}</Text>
+            <Text style={styles.priceText}>{formatPrice(item.pricePerUnit, userProfile?.currency)}</Text>
             <Text style={styles.priceUnit}>/kg</Text>
           </View>
         </View>
@@ -214,7 +215,7 @@ export default function BuyerMarketScreen() {
               {item.type === 'wholesale' ? 'Wholesale Purchase' : 'Crop Purchase'}
             </Text>
             <Text style={styles.sellerName}>
-              {item.quantity} kg • GH₵{item.totalPrice?.toFixed(2)}
+              {item.quantity} kg • {formatPrice(item.totalPrice, userProfile?.currency)}
             </Text>
             <Text style={styles.orderDate}>
               {item.createdAt?.toDate
@@ -347,7 +348,7 @@ export default function BuyerMarketScreen() {
                 : `🌾 ${buyTarget?.item?.cropType}`}
             </Text>
             <Text style={styles.modalPrice}>
-              GH₵{buyTarget?.item?.pricePerUnit}/{buyTarget?.type === 'listing' ? buyTarget?.item?.unit : 'kg'} wholesale
+              {formatPrice(buyTarget?.item?.pricePerUnit, userProfile?.currency)}/{buyTarget?.type === 'listing' ? buyTarget?.item?.unit : 'kg'} wholesale
             </Text>
             <Text style={styles.modalLabel}>Quantity (kg):</Text>
             <TextInput
@@ -367,7 +368,7 @@ export default function BuyerMarketScreen() {
             </TouchableOpacity>
             {buyQuantity && parseFloat(buyQuantity) > 0 && (
               <Text style={styles.totalPrice}>
-                Total: GH₵{(parseFloat(buyQuantity) * (buyTarget?.item?.pricePerUnit || 0)).toFixed(2)}
+                Total: {formatPrice(parseFloat(buyQuantity) * (buyTarget?.item?.pricePerUnit || 0), userProfile?.currency)}
               </Text>
             )}
             <View style={styles.modalBtns}>

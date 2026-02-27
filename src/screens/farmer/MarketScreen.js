@@ -27,6 +27,7 @@ import {
   markInventoryListed,
 } from '../../services/marketService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
+import { formatPrice, getCurrencySymbol } from '../../config/currencies';
 
 export default function MarketScreen() {
   const { user, userProfile } = useAuth();
@@ -224,7 +225,7 @@ export default function MarketScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>{item.cropName}</Text>
             <Text style={styles.cardMeta}>
-              {item.quantity} {item.unit} • GH₵{item.pricePerUnit}/{item.unit}
+              {item.quantity} {item.unit} • {formatPrice(item.pricePerUnit, userProfile?.currency)}/{item.unit}
             </Text>
           </View>
           <View style={[styles.badge, { backgroundColor: statusColor + '20' }]}>
@@ -251,7 +252,7 @@ export default function MarketScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>{item.cropType} Group Sale</Text>
             <Text style={styles.cardMeta}>
-              GH₵{item.pricePerUnit}/kg • {item.contributors?.length || 1} contributor(s)
+              {formatPrice(item.pricePerUnit, userProfile?.currency)}/kg • {item.contributors?.length || 1} contributor(s)
             </Text>
           </View>
           <View style={[styles.badge, { backgroundColor: '#E3F2FD' }]}>
@@ -387,7 +388,7 @@ export default function MarketScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>List {listForm.cropEmoji} {listForm.cropName} for Sale</Text>
             <FormInput label="Quantity (kg)" value={listForm.quantity} onChangeText={(v) => setListForm({ ...listForm, quantity: v })} keyboardType="numeric" />
-            <FormInput label="Price per kg (GH₵)" value={listForm.pricePerUnit} onChangeText={(v) => setListForm({ ...listForm, pricePerUnit: v })} keyboardType="numeric" />
+            <FormInput label={`Price per kg (${getCurrencySymbol(userProfile?.currency)})`} value={listForm.pricePerUnit} onChangeText={(v) => setListForm({ ...listForm, pricePerUnit: v })} keyboardType="numeric" />
             <FormInput label="Description (optional)" value={listForm.description} onChangeText={(v) => setListForm({ ...listForm, description: v })} multiline />
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowListingModal(false)}>
@@ -408,7 +409,7 @@ export default function MarketScreen() {
             <Text style={styles.modalTitle}>Create Group Sale: {saleForm.cropEmoji} {saleForm.cropName}</Text>
             <FormInput label={`Your contribution (kg) — max ${saleForm.initialQuantity} kg`} value={saleForm.initialQuantity} onChangeText={(v) => setSaleForm({ ...saleForm, initialQuantity: v })} keyboardType="numeric" />
             <FormInput label="Target total quantity (kg)" value={saleForm.targetQuantity} onChangeText={(v) => setSaleForm({ ...saleForm, targetQuantity: v })} keyboardType="numeric" />
-            <FormInput label="Wholesale price per kg (GH₵)" value={saleForm.pricePerUnit} onChangeText={(v) => setSaleForm({ ...saleForm, pricePerUnit: v })} keyboardType="numeric" />
+            <FormInput label={`Wholesale price per kg (${getCurrencySymbol(userProfile?.currency)})`} value={saleForm.pricePerUnit} onChangeText={(v) => setSaleForm({ ...saleForm, pricePerUnit: v })} keyboardType="numeric" />
             <FormInput label="Description" value={saleForm.description} onChangeText={(v) => setSaleForm({ ...saleForm, description: v })} multiline />
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowUnitSaleModal(false)}>

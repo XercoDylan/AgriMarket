@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { createJob, getMyJobs, acceptApplicant, closeJob } from '../../services/jobService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
+import { formatPrice, getCurrencySymbol } from '../../config/currencies';
 
 const TASK_TYPES = [
   { id: 'planting', label: 'Planting', emoji: '🌱' },
@@ -161,7 +162,7 @@ export default function FarmerJobsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.cardMeta}>
-                {item.location} • GH₵{item.pay}/{item.payPeriod.replace('_', ' ')}
+                {item.location} • {formatPrice(item.pay, userProfile?.currency)}/{item.payPeriod.replace('_', ' ')}
               </Text>
             </View>
             <View style={[styles.badge, { backgroundColor: statusCfg.bg }]}>
@@ -299,7 +300,7 @@ export default function FarmerJobsScreen() {
 
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <View style={{ flex: 1 }}>
-                <FormInput label="Pay (GH₵) *" value={form.pay} onChangeText={(v) => setForm({ ...form, pay: v })} keyboardType="numeric" />
+                <FormInput label={`Pay (${getCurrencySymbol(userProfile?.currency)}) *`} value={form.pay} onChangeText={(v) => setForm({ ...form, pay: v })} keyboardType="numeric" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>Pay Period</Text>

@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
+import { CURRENCIES } from '../../config/currencies';
 
 const ROLES = [
   {
@@ -46,6 +47,7 @@ export default function OnboardingScreen({ route, navigation }) {
   const { createProfile, user } = useAuth();
   const [name, setName] = useState('');
   const [selectedRole, setSelectedRole] = useState(null);
+  const [selectedCurrency, setSelectedCurrency] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const resolvedUid = uid || user?.uid;
@@ -57,6 +59,10 @@ export default function OnboardingScreen({ route, navigation }) {
     }
     if (!selectedRole) {
       Alert.alert('Select a Role', 'Please choose how you will use AgriMarket.');
+      return;
+    }
+    if (!selectedCurrency) {
+      Alert.alert('Select a Currency', 'Please choose your preferred currency for prices.');
       return;
     }
     if (!resolvedUid) {
@@ -71,6 +77,7 @@ export default function OnboardingScreen({ route, navigation }) {
         name: name.trim(),
         role: selectedRole,
         email: user?.email || '',
+        currency: selectedCurrency,
       });
     } catch (error) {
       Alert.alert('Error', 'Failed to save your profile. Please try again.');
@@ -136,6 +143,34 @@ export default function OnboardingScreen({ route, navigation }) {
             </TouchableOpacity>
           );
         })}
+
+        {/* Currency selection */}
+        <Text style={styles.sectionLabel}>Preferred currency</Text>
+        <View style={styles.currencyList}>
+          {CURRENCIES.map((curr) => {
+            const isSelected = selectedCurrency === curr.code;
+            return (
+              <TouchableOpacity
+                key={curr.code}
+                style={[
+                  styles.currencyRow,
+                  isSelected && { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primaryLighter },
+                ]}
+                onPress={() => setSelectedCurrency(curr.code)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.currencySymbol, isSelected && { color: colors.primary }]}>{curr.symbol}</Text>
+                <View style={styles.currencyInfo}>
+                  <Text style={[styles.currencyName, isSelected && { color: colors.primary }]}>{curr.name}</Text>
+                  <Text style={styles.currencyCode}>{curr.code}</Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
         <TouchableOpacity
           style={[styles.button, loading && { opacity: 0.7 }]}
@@ -226,6 +261,38 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
     lineHeight: 17,
+  },
+  currencyList: {
+    marginBottom: spacing.md,
+  },
+  currencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  currencySymbol: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginRight: spacing.md,
+    minWidth: 36,
+  },
+  currencyInfo: { flex: 1 },
+  currencyName: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  currencyCode: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 1,
   },
   button: {
     backgroundColor: colors.primary,
