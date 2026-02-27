@@ -5,6 +5,7 @@ import PlantScreen from '../screens/farmer/PlantScreen';
 import InventoryScreen from '../screens/farmer/InventoryScreen';
 import MarketScreen from '../screens/farmer/MarketScreen';
 import FarmerJobsScreen from '../screens/farmer/FarmerJobsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import { colors } from '../config/theme';
 
 const Tab = createBottomTabNavigator();
@@ -19,6 +20,7 @@ export default function FarmerNavigator() {
             Inventory: focused ? 'archive' : 'archive-outline',
             Market: focused ? 'cart' : 'cart-outline',
             Jobs: focused ? 'briefcase' : 'briefcase-outline',
+            Profile: focused ? 'person' : 'person-outline',
           };
           return <Ionicons name={icons[route.name]} size={size} color={color} />;
         },
@@ -41,6 +43,7 @@ export default function FarmerNavigator() {
       <Tab.Screen name="Inventory" component={InventoryScreen} options={{ title: 'Inventory' }} />
       <Tab.Screen name="Market" component={MarketScreen} options={{ title: 'Market' }} />
       <Tab.Screen name="Jobs" component={FarmerJobsScreen} options={{ title: 'Jobs' }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
     </Tab.Navigator>
   );
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import BuyerMarketScreen from '../screens/buyer/BuyerMarketScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import { colors } from '../config/theme';
 
 const Tab = createBottomTabNavigator();
@@ -31,6 +32,16 @@ export default function BuyerNavigator() {
           title: 'AgriMarket',
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
         }}
       />

@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import ContractorJobsScreen from '../screens/contractor/ContractorJobsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import { colors } from '../config/theme';
 
 const Tab = createBottomTabNavigator();
@@ -31,6 +32,16 @@ export default function ContractorNavigator() {
           title: 'Find Jobs',
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons name={focused ? 'briefcase' : 'briefcase-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
         }}
       />
