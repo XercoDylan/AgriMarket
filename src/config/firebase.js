@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import { initializeApp, getApp, getApps } from 'firebase/app';
+import { initializeAuth, getAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -14,11 +14,38 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+const requiredKeys = [
+  'apiKey',
+  'authDomain',
+  'projectId',
+  'storageBucket',
+  'messagingSenderId',
+  'appId',
+];
 
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+const missing = requiredKeys.filter((key) => !firebaseConfig[key]);
+if (missing.length > 0) {
+  throw new Error(`Missing Firebase config values: ${missing.join(', ')}`);
+}
+
+if (!String(firebaseConfig.appId).startsWith('1:')) {
+  throw new Error(
+    'Invalid EXPO_PUBLIC_FIREBASE_APP_ID. Use Firebase Web App ID (starts with "1:"), not Measurement ID (starts with "G-").'
+  );
+}
+
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
+// Fast refresh can re-run module code; initializeAuth can only run once per app.
+export const auth = (() => {
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    return getAuth(app);
+  }
+})();
 
 export const db = getFirestore(app);
 

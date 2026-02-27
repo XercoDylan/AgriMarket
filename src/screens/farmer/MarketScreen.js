@@ -11,6 +11,7 @@ import {
   TextInput,
   ScrollView,
   RefreshControl,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -463,6 +464,7 @@ export default function MarketScreen() {
 }
 
 function FormInput({ label, value, onChangeText, keyboardType, multiline }) {
+  const isNumeric = keyboardType === 'numeric' || keyboardType === 'decimal-pad' || keyboardType === 'number-pad';
   return (
     <View style={{ marginBottom: spacing.md }}>
       <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 4, fontWeight: '600' }}>{label}</Text>
@@ -483,8 +485,16 @@ function FormInput({ label, value, onChangeText, keyboardType, multiline }) {
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         multiline={multiline}
+        returnKeyType={multiline ? 'default' : 'done'}
+        blurOnSubmit={!multiline}
+        onSubmitEditing={Keyboard.dismiss}
         placeholderTextColor={colors.textMuted}
       />
+      {isNumeric && (
+        <TouchableOpacity onPress={Keyboard.dismiss} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+          <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Done</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

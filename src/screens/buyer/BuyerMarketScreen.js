@@ -11,6 +11,9 @@ import {
   TextInput,
   ScrollView,
   RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -335,7 +338,8 @@ export default function BuyerMarketScreen() {
       {/* Buy Modal */}
       <Modal visible={!!buyTarget} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
               Buy{' '}
               {buyTarget?.type === 'listing'
@@ -350,11 +354,17 @@ export default function BuyerMarketScreen() {
               style={styles.quantityInput}
               value={buyQuantity}
               onChangeText={setBuyQuantity}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               placeholder={`Max: ${buyTarget?.type === 'listing' ? buyTarget?.item?.quantity : buyTarget?.item?.currentQuantity} kg`}
               placeholderTextColor={colors.textMuted}
               autoFocus
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
             />
+            <TouchableOpacity onPress={Keyboard.dismiss} style={{ alignSelf: 'flex-end', marginBottom: spacing.sm }}>
+              <Text style={{ color: colors.primary, fontWeight: '700' }}>Done</Text>
+            </TouchableOpacity>
             {buyQuantity && parseFloat(buyQuantity) > 0 && (
               <Text style={styles.totalPrice}>
                 Total: GH₵{(parseFloat(buyQuantity) * (buyTarget?.item?.pricePerUnit || 0)).toFixed(2)}
@@ -376,7 +386,8 @@ export default function BuyerMarketScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>

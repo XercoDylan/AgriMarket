@@ -41,8 +41,12 @@ export default function SignInScreen({ navigation }) {
         msg = 'Invalid email or password.';
       } else if (error.code === 'auth/invalid-email') {
         msg = 'Please enter a valid email address.';
+      } else if (error.code === 'auth/operation-not-allowed') {
+        msg = 'Email/Password sign-in is disabled in Firebase Console. Enable it in Authentication -> Sign-in method.';
       } else if (error.code === 'auth/too-many-requests') {
         msg = 'Too many attempts. Please try again later.';
+      } else if (error?.message) {
+        msg = error.message;
       }
       Alert.alert('Sign In Failed', msg);
     } finally {
