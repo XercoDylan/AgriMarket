@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,9 @@ import { savePlantingPlan, calculateFarmArea, orderBoundaryPoints } from '../../
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 
 const { width } = Dimensions.get('window');
+
+// Edge padding when fitting map to boundary so the last corner isn't hidden by footer/controls
+const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
 const CROPS = [
   { id: 'maize', name: 'Maize', emoji: '🌽' },
@@ -105,6 +108,15 @@ export default function PlantScreen() {
           lon: farmBoundary.reduce((s, c) => s + c.longitude, 0) / farmBoundary.length,
         }
       : null;
+
+  // Fit map to show all boundary points so the last numbered corner is visible
+  useEffect(() => {
+    if (step !== 0 || farmBoundary.length === 0 || !mapRef.current) return;
+    mapRef.current.fitToCoordinates(farmBoundary, {
+      edgePadding: MAP_FIT_PADDING,
+      animated: true,
+    });
+  }, [step, farmBoundary.length]);
 
   const goToCurrentLocation = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
