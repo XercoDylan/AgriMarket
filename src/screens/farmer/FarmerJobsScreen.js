@@ -12,8 +12,10 @@ import {
   ScrollView,
   RefreshControl,
   Keyboard,
+  Dimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { createJob, getMyJobs, acceptApplicant, closeJob } from '../../services/jobService';
@@ -29,6 +31,7 @@ const TASK_TYPES = [
 ];
 
 const PAY_PERIODS = ['per_day', 'per_task', 'per_kg'];
+const MODAL_MAX_HEIGHT_RATIO = 0.9;
 
 const STATUS_COLORS = {
   open: { color: colors.primary, bg: '#E8F5E9' },
@@ -38,6 +41,8 @@ const STATUS_COLORS = {
 
 export default function FarmerJobsScreen() {
   const { user, userProfile } = useAuth();
+  const insets = useSafeAreaInsets();
+  const windowHeight = Dimensions.get('window').height;
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -259,13 +264,18 @@ export default function FarmerJobsScreen() {
       {/* Post Job Modal */}
       <Modal visible={showModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Post a Job</Text>
-              <TouchableOpacity onPress={() => setShowModal(false)}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.modalSheet, { maxHeight: windowHeight * MODAL_MAX_HEIGHT_RATIO }]}>
+            <ScrollView
+              contentContainerStyle={[styles.modalContent, { paddingTop: Math.max(insets.top, spacing.md) }]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={true}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Post a Job</Text>
+                <TouchableOpacity onPress={() => setShowModal(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Ionicons name="close" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
 
             <FormInput label="Job Title *" value={form.title} onChangeText={(v) => setForm({ ...form, title: v })} placeholder="e.g., Need 5 workers for maize harvest" />
             <FormInput label="Description" value={form.description} onChangeText={(v) => setForm({ ...form, description: v })} placeholder="Describe the work in detail..." multiline />
@@ -322,6 +332,7 @@ export default function FarmerJobsScreen() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+      </View>
       </Modal>
     </View>
   );
@@ -408,7 +419,13 @@ const styles = StyleSheet.create({
     ...shadow.md,
   },
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: spacing.lg, paddingBottom: 40 },
+  modalSheet: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  modalContent: { padding: spacing.lg, paddingBottom: 40 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
   modalTitle: { ...typography.h3, color: colors.textPrimary },
   fieldLabel: { fontSize: 13, color: colors.textSecondary, marginBottom: 6, fontWeight: '600' },

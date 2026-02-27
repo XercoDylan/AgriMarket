@@ -29,7 +29,7 @@ const CROPS = [
   { id: 'maize', name: 'Maize', emoji: '🌽' },
   { id: 'cassava', name: 'Cassava', emoji: '🥔' },
   { id: 'yam', name: 'Yam', emoji: '🍠' },
-  { id: 'rice', name: 'Rice', emoji: '🌾' },
+  { id: 'rice', name: 'Rice', emoji: '🍚' },
   { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
   { id: 'tomato', name: 'Tomato', emoji: '🍅' },
   { id: 'onion', name: 'Onion', emoji: '🧅' },
@@ -109,12 +109,23 @@ export default function PlantScreen() {
         }
       : null;
 
-  // Fit map to show all boundary points so the last numbered corner is visible
+  // Fit map to show all boundary points so the last numbered corner is visible.
+  // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
   useEffect(() => {
     if (step !== 0 || farmBoundary.length === 0 || !mapRef.current) return;
+    const lastPoint = farmBoundary[farmBoundary.length - 1];
+    // If we already have points and the new one is within the visible region (with margin), skip fit
+    const margin = 0.3;
+    const latHalf = region.latitudeDelta * (0.5 - margin);
+    const lonHalf = region.longitudeDelta * (0.5 - margin);
+    const isNewPointVisible =
+      Math.abs(lastPoint.latitude - region.latitude) <= latHalf &&
+      Math.abs(lastPoint.longitude - region.longitude) <= lonHalf;
+    if (farmBoundary.length > 1 && isNewPointVisible) return;
+
     mapRef.current.fitToCoordinates(farmBoundary, {
       edgePadding: MAP_FIT_PADDING,
-      animated: true,
+      animated: false,
     });
   }, [step, farmBoundary.length]);
 

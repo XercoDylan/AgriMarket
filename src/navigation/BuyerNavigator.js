@@ -29,7 +29,7 @@ export default function BuyerNavigator() {
         name="Market"
         component={BuyerMarketScreen}
         options={{
-          title: 'AgriMarket',
+          title: 'Market',
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={size} color={color} />
           ),

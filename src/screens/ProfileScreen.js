@@ -24,6 +24,8 @@ export default function ProfileScreen() {
         <View style={styles.avatar}>
           <Ionicons name="person" size={40} color={colors.primary} />
         </View>
+        <Text style={styles.label}>Name</Text>
+        <Text style={styles.value}>{userProfile?.name ?? '—'}</Text>
         <Text style={styles.label}>Email</Text>
         <Text style={styles.value}>{user?.email ?? '—'}</Text>
         <Text style={styles.label}>Role</Text>
