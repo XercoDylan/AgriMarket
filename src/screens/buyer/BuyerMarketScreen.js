@@ -28,7 +28,25 @@ import {
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 import { formatPrice } from '../../config/currencies';
 
-const CROP_FILTERS = ['All', 'Maize', 'Rice', 'Tomato', 'Cassava', 'Yam', 'Onion', 'Pepper', 'Groundnut'];
+// Same crops as farmer PlantScreen, sorted alphabetically by name
+const CROP_OPTIONS = [
+  { id: 'cassava', name: 'Cassava', emoji: '🥔' },
+  { id: 'cocoa', name: 'Cocoa', emoji: '🍫' },
+  { id: 'cotton', name: 'Cotton', emoji: '🌱' },
+  { id: 'cowpea', name: 'Cowpea', emoji: '🫘' },
+  { id: 'groundnut', name: 'Groundnut', emoji: '🥜' },
+  { id: 'maize', name: 'Maize', emoji: '🌽' },
+  { id: 'millet', name: 'Millet', emoji: '🌾' },
+  { id: 'okra', name: 'Okra', emoji: '🌿' },
+  { id: 'onion', name: 'Onion', emoji: '🧅' },
+  { id: 'pepper', name: 'Pepper', emoji: '🌶️' },
+  { id: 'plantain', name: 'Plantain', emoji: '🍌' },
+  { id: 'rice', name: 'Rice', emoji: '🍚' },
+  { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
+  { id: 'sugarcane', name: 'Sugarcane', emoji: '🎋' },
+  { id: 'tomato', name: 'Tomato', emoji: '🍅' },
+  { id: 'yam', name: 'Yam', emoji: '🍠' },
+];
 
 export default function BuyerMarketScreen() {
   const { user, userProfile } = useAuth();
@@ -39,6 +57,8 @@ export default function BuyerMarketScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cropFilter, setCropFilter] = useState('All');
+  const [selectedCrops, setSelectedCrops] = useState([]);
+  const [cropDropdownVisible, setCropDropdownVisible] = useState(false);
 
   // Buy modal
   const [buyTarget, setBuyTarget] = useState(null); // { type: 'listing'|'wholesale', item }
@@ -75,13 +95,31 @@ export default function BuyerMarketScreen() {
     load();
   };
 
-  const filteredListings = cropFilter === 'All'
-    ? listings
-    : listings.filter((l) => l.cropName?.toLowerCase().includes(cropFilter.toLowerCase()));
+  const filteredListings =
+    selectedCrops.length === 0
+      ? listings
+      : listings.filter((l) =>
+          selectedCrops.some((c) => (l.cropName || '').toLowerCase().includes(c.toLowerCase()))
+        );
 
-  const filteredUnitSales = cropFilter === 'All'
-    ? unitSales
-    : unitSales.filter((s) => s.cropType?.toLowerCase().includes(cropFilter.toLowerCase()));
+  const filteredUnitSales =
+    selectedCrops.length === 0
+      ? unitSales
+      : unitSales.filter((s) =>
+          selectedCrops.some((c) => (s.cropType || '').toLowerCase().includes(c.toLowerCase()))
+        );
+
+  const addCrop = (crop) => {
+    if (selectedCrops.includes(crop)) {
+      setSelectedCrops((prev) => prev.filter((c) => c !== crop));
+    } else {
+      setSelectedCrops((prev) => [...prev, crop]);
+    }
+  };
+
+  const removeCrop = (crop) => {
+    setSelectedCrops((prev) => prev.filter((c) => c !== crop));
+  };
 
   const openBuyModal = (type, item) => {
     setBuyQuantity('');
@@ -265,25 +303,88 @@ export default function BuyerMarketScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Crop filter (only for individual/wholesale) */}
+      {/* Crop filter (only for individual/wholesale): dropdown + selected chips */}
       {tab !== 'orders' && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterBar}
-          contentContainerStyle={{ paddingHorizontal: spacing.md, gap: 8 }}
-        >
-          {CROP_FILTERS.map((f) => (
+        <View style={styles.filterBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterBarContent}
+          >
             <TouchableOpacity
-              key={f}
-              style={[styles.filterChip, cropFilter === f && styles.filterChipActive]}
-              onPress={() => setCropFilter(f)}
+              style={styles.filterDropdown}
+              onPress={() => setCropDropdownVisible(true)}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.filterChipText, cropFilter === f && styles.filterChipTextActive]}>{f}</Text>
+              <Text style={styles.filterDropdownText}>Select crop</Text>
+              <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+            {selectedCrops.map((cropName) => {
+              const crop = CROP_OPTIONS.find((c) => c.name === cropName);
+              return (
+                <View key={cropName} style={styles.filterChipActive}>
+                  {crop ? <Text style={styles.filterChipEmoji}>{crop.emoji}</Text> : null}
+                  <Text style={styles.filterChipTextActive}>{cropName}</Text>
+                  <TouchableOpacity
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    onPress={() => removeCrop(cropName)}
+                    style={styles.filterChipRemove}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
+
+      {/* Crop dropdown modal */}
+      <Modal
+        visible={cropDropdownVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCropDropdownVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setCropDropdownVisible(false)}
+        >
+          <TouchableOpacity
+            style={styles.dropdownBox}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <Text style={styles.dropdownTitle}>Select a crop to filter</Text>
+            <ScrollView style={styles.dropdownList} keyboardShouldPersistTaps="handled">
+              {CROP_OPTIONS.map((crop) => (
+                <TouchableOpacity
+                  key={crop.id}
+                  style={[
+                    styles.dropdownItem,
+                    selectedCrops.includes(crop.name) && styles.dropdownItemSelected,
+                  ]}
+                  onPress={() => addCrop(crop.name)}
+                >
+                  <Text style={styles.dropdownItemEmoji}>{crop.emoji}</Text>
+                  <Text
+                    style={[
+                      styles.dropdownItemText,
+                      selectedCrops.includes(crop.name) && styles.dropdownItemTextSelected,
+                    ]}
+                  >
+                    {crop.name}
+                  </Text>
+                  {selectedCrops.includes(crop.name) && (
+                    <Ionicons name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {tab === 'individual' && (
         <FlatList
@@ -407,7 +508,27 @@ const styles = StyleSheet.create({
   tabActive: { borderBottomWidth: 2, borderBottomColor: colors.primary },
   tabText: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
   tabTextActive: { color: colors.primary },
-  filterBar: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: spacing.sm, maxHeight: 52 },
+  filterBar: {
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: spacing.sm,
+    maxHeight: 52,
+  },
+  filterBarContent: { paddingHorizontal: spacing.md, gap: 8, alignItems: 'center' },
+  filterDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    gap: 4,
+  },
+  filterDropdownText: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
+  filterChipRemove: { marginLeft: 2 },
   filterChip: {
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
@@ -416,7 +537,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterChipActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    paddingLeft: spacing.md,
+    paddingVertical: 6,
+    paddingRight: 4,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+  },
+  filterChipEmoji: { fontSize: 16, marginRight: 4 },
   filterChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
   filterChipTextActive: { color: '#fff' },
   card: {
@@ -488,4 +620,38 @@ const styles = StyleSheet.create({
   modalCancelText: { color: colors.textSecondary, fontWeight: '600' },
   modalSubmitBtn: { flex: 2, padding: spacing.md, borderRadius: borderRadius.md, backgroundColor: colors.primary, alignItems: 'center' },
   modalSubmitText: { color: '#fff', fontWeight: '700' },
+  dropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  dropdownBox: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.sm,
+    minWidth: 220,
+    maxHeight: 320,
+    ...shadow.md,
+  },
+  dropdownTitle: {
+    ...typography.caption,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  dropdownList: { maxHeight: 260 },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  dropdownItemSelected: { backgroundColor: colors.primaryLighter + '40' },
+  dropdownItemEmoji: { fontSize: 22, marginRight: spacing.sm },
+  dropdownItemText: { fontSize: 15, color: colors.textPrimary, fontWeight: '500', flex: 1 },
+  dropdownItemTextSelected: { color: colors.primary, fontWeight: '600' },
 });

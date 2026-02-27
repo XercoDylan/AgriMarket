@@ -484,6 +484,7 @@ export default function PlantScreen() {
 
             {/* Interactive AI plan */}
             {planSections.length > 0 ? (
+<<<<<<< HEAD
               <>
                 <View style={styles.progressCard}>
                   <View style={styles.progressHeader}>
@@ -491,6 +492,15 @@ export default function PlantScreen() {
                     <Text style={styles.progressMeta}>
                       {completedActionCount}/{totalActionCount} tasks complete
                     </Text>
+=======
+              planSections.map((section, idx) => (
+                <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionIndexCircle}>
+                      <Text style={styles.sectionIndexText}>{idx + 1}</Text>
+                    </View>
+                    <Text style={styles.sectionTitle}>{section.title}</Text>
+>>>>>>> 110819eed8d562189b7d2893abeb1777c963b73f
                   </View>
                   <View style={styles.progressTrack}>
                     <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
@@ -930,19 +940,25 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.sm,
   },
+<<<<<<< HEAD
   sectionHeader: { flexDirection: 'row', alignItems: 'center' },
   sectionIndex: {
+=======
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
+  sectionIndexCircle: {
+>>>>>>> 110819eed8d562189b7d2893abeb1777c963b73f
     width: 24,
     height: 24,
     borderRadius: 12,
     backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  sectionIndexText: {
     color: '#fff',
-    textAlign: 'center',
-    textAlignVertical: 'center',
     fontSize: 12,
     fontWeight: '800',
-    marginRight: spacing.sm,
-    overflow: 'hidden',
   },
   sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
   sectionMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
