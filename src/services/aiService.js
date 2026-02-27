@@ -10,14 +10,14 @@ Current Weather: ${weatherSummary}
 Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
 
 Provide a concise plan with these sections:
-1. **Timeline** – Week-by-week schedule from soil prep to harvest
-2. **Soil Preparation** – What to do before planting
-3. **Planting** – Spacing, depth, density
-4. **Water & Irrigation** – Requirements and schedule
-5. **Fertilizer** – Type, timing, quantities
-6. **Pest & Disease Management** – Common threats and prevention
-7. **Expected Yield** – Estimated kg per hectare
-8. **Total Days to Harvest** – Realistic estimate
+1. **Timeline** - Week-by-week schedule from soil prep to harvest
+2. **Soil Preparation** - What to do before planting
+3. **Planting** - Spacing, depth, density
+4. **Water & Irrigation** - Requirements and schedule
+5. **Fertilizer** - Type, timing, quantities
+6. **Pest & Disease Management** - Common threats and prevention
+7. **Expected Yield** - Estimated kg per hectare
+8. **Total Days to Harvest** - Realistic estimate
 
 Keep advice practical and suited for small-to-medium African farmers. Be specific with numbers.`;
 
