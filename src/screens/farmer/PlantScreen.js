@@ -431,7 +431,9 @@ export default function PlantScreen() {
               planSections.map((section, idx) => (
                 <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
                   <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionIndex}>{idx + 1}</Text>
+                    <View style={styles.sectionIndexCircle}>
+                      <Text style={styles.sectionIndexText}>{idx + 1}</Text>
+                    </View>
                     <Text style={styles.sectionTitle}>{section.title}</Text>
                   </View>
                   <Text style={styles.sectionBody}>{section.content}</Text>
@@ -705,18 +707,19 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  sectionIndex: {
+  sectionIndexCircle: {
     width: 24,
     height: 24,
     borderRadius: 12,
     backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  sectionIndexText: {
     color: '#fff',
-    textAlign: 'center',
-    textAlignVertical: 'center',
     fontSize: 12,
     fontWeight: '800',
-    marginRight: spacing.sm,
-    overflow: 'hidden',
   },
   sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
   sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
