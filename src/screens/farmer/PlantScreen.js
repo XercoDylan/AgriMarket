@@ -8,8 +8,6 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
-  Modal,
-  Dimensions,
 } from 'react-native';
 import MapView, { Marker, Polygon } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -20,28 +18,26 @@ import { generateFarmingPlan } from '../../services/aiService';
 import { savePlantingPlan, calculateFarmArea, orderBoundaryPoints } from '../../services/plantService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 
-const { width } = Dimensions.get('window');
-
 // Edge padding when fitting map to boundary so the last corner isn't hidden by footer/controls
 const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
 const CROPS = [
-  { id: 'maize', name: 'Maize', emoji: '🌽' },
-  { id: 'cassava', name: 'Cassava', emoji: '🥔' },
-  { id: 'yam', name: 'Yam', emoji: '🍠' },
-  { id: 'rice', name: 'Rice', emoji: '🍚' },
-  { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
-  { id: 'tomato', name: 'Tomato', emoji: '🍅' },
-  { id: 'onion', name: 'Onion', emoji: '🧅' },
-  { id: 'pepper', name: 'Pepper', emoji: '🌶️' },
-  { id: 'groundnut', name: 'Groundnut', emoji: '🥜' },
-  { id: 'cowpea', name: 'Cowpea', emoji: '🫘' },
-  { id: 'plantain', name: 'Plantain', emoji: '🍌' },
-  { id: 'okra', name: 'Okra', emoji: '🌿' },
-  { id: 'millet', name: 'Millet', emoji: '🌾' },
-  { id: 'cotton', name: 'Cotton', emoji: '🌱' },
-  { id: 'sugarcane', name: 'Sugarcane', emoji: '🎋' },
-  { id: 'cocoa', name: 'Cocoa', emoji: '🍫' },
+  { id: 'maize', name: 'Maize', emoji: '\u{1F33D}' },
+  { id: 'cassava', name: 'Cassava', emoji: '\u{1F954}' },
+  { id: 'yam', name: 'Yam', emoji: '\u{1F360}' },
+  { id: 'rice', name: 'Rice', emoji: '\u{1F35A}' },
+  { id: 'sorghum', name: 'Sorghum', emoji: '\u{1F33E}' },
+  { id: 'tomato', name: 'Tomato', emoji: '\u{1F345}' },
+  { id: 'onion', name: 'Onion', emoji: '\u{1F9C5}' },
+  { id: 'pepper', name: 'Pepper', emoji: '\u{1F336}\uFE0F' },
+  { id: 'groundnut', name: 'Groundnut', emoji: '\u{1F95C}' },
+  { id: 'cowpea', name: 'Cowpea', emoji: '\u{1FAD8}' },
+  { id: 'plantain', name: 'Plantain', emoji: '\u{1F34C}' },
+  { id: 'okra', name: 'Okra', emoji: '\u{1F33F}' },
+  { id: 'millet', name: 'Millet', emoji: '\u{1F33E}' },
+  { id: 'cotton', name: 'Cotton', emoji: '\u{1F331}' },
+  { id: 'sugarcane', name: 'Sugarcane', emoji: '\u{1F38B}' },
+  { id: 'cocoa', name: 'Cocoa', emoji: '\u{1F36B}' },
 ];
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
@@ -55,30 +51,57 @@ function parsePlanSections(planText) {
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+    if (!line) continue;
+
     const headingMatch =
-      line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*[–-]?\s*(.*)$/) ||
-      line.match(/^\d+\.\s*(.+?):\s*(.*)$/);
+      line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*-?\s*(.*)$/) ||
+      line.match(/^\d+\.\s*(.+?):\s*(.*)$/) ||
+      line.match(/^(?:step\s*)?\d+\s*[-.:)]\s*(.+?)(?::\s*(.*))?$/i);
 
     if (headingMatch) {
       if (current) sections.push(current);
       current = {
         title: headingMatch[1].trim(),
         content: headingMatch[2]?.trim() || '',
+        actionItems: [],
       };
       continue;
     }
 
+    const actionMatch = line.match(/^(?:[-*]\s+|\d+[\).]\s+)(.+)$/);
+    if (actionMatch) {
+      if (!current) {
+        current = { title: 'Plan Overview', content: '', actionItems: [] };
+      }
+      current.actionItems.push(actionMatch[1].trim());
+      continue;
+    }
+
     if (!current) {
-      current = { title: 'Plan Overview', content: line };
+      current = { title: 'Plan Overview', content: line, actionItems: [] };
     } else {
       current.content = `${current.content}${current.content ? '\n' : ''}${line}`.trim();
     }
   }
 
   if (current) sections.push(current);
-  return sections.filter((s) => s.content);
-}
+  return sections
+    .map((section) => {
+      if (section.actionItems.length > 0) return section;
 
+      const fallbackActions = section.content
+        .split(/\n|;\s+|\.\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 8)
+        .slice(0, 3);
+
+      return {
+        ...section,
+        actionItems: fallbackActions,
+      };
+    })
+    .filter((s) => s.content || s.actionItems.length > 0);
+}
 export default function PlantScreen() {
   const { user, userProfile } = useAuth();
   const mapRef = useRef(null);
@@ -101,6 +124,9 @@ export default function PlantScreen() {
   const orderedBoundary = orderBoundaryPoints(farmBoundary);
   const farmArea = calculateFarmArea(orderedBoundary);
   const planSections = parsePlanSections(aiPlan);
+  const [completedActions, setCompletedActions] = useState({});
+  const [expandedSections, setExpandedSections] = useState({});
+
   const farmCenter =
     farmBoundary.length > 0
       ? {
@@ -108,6 +134,36 @@ export default function PlantScreen() {
           lon: farmBoundary.reduce((s, c) => s + c.longitude, 0) / farmBoundary.length,
         }
       : null;
+
+  useEffect(() => {
+    if (planSections.length > 0) {
+      setCompletedActions({});
+      setExpandedSections({ 0: true });
+      return;
+    }
+    setCompletedActions({});
+    setExpandedSections({});
+  }, [aiPlan]);
+
+  const getActionKey = (sectionIdx, actionIdx) => `${sectionIdx}-${actionIdx}`;
+  const getCompletedActionsForSection = (section, sectionIdx) =>
+    section.actionItems.filter((_, actionIdx) => completedActions[getActionKey(sectionIdx, actionIdx)]).length;
+  const isSectionCompleted = (section, sectionIdx) =>
+    section.actionItems.length > 0 &&
+    getCompletedActionsForSection(section, sectionIdx) === section.actionItems.length;
+  const totalActionCount = planSections.reduce((sum, section) => sum + section.actionItems.length, 0);
+  const completedActionCount = planSections.reduce(
+    (sum, section, sectionIdx) => sum + getCompletedActionsForSection(section, sectionIdx),
+    0
+  );
+  const progressPercent = totalActionCount > 0 ? Math.round((completedActionCount / totalActionCount) * 100) : 0;
+  const nextIncompleteSectionIdx = planSections.findIndex((section, idx) => !isSectionCompleted(section, idx));
+  const getSectionTip = (section) => {
+    const source = section?.content?.trim();
+    if (!source) return null;
+    const firstSentence = source.split(/(?<=[.!?])\s+/)[0]?.trim() || source;
+    return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
+  };
 
   // Fit map to show all boundary points so the last numbered corner is visible.
   // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
@@ -183,7 +239,7 @@ export default function PlantScreen() {
           weatherSummary = formatWeatherSummary(weatherData);
           setWeather(weatherData);
         } catch {
-          // Weather optional – continue without it
+          // Weather optional - continue without it
         }
       }
       const plan = await generateFarmingPlan({
@@ -244,7 +300,7 @@ export default function PlantScreen() {
     }
   };
 
-  // ─── Step Indicator ─────────────────────────────────────────────────────
+  // Step Indicator
   const StepIndicator = () => (
     <View style={styles.stepIndicator}>
       {STEPS.map((label, idx) => (
@@ -264,7 +320,7 @@ export default function PlantScreen() {
     </View>
   );
 
-  // ─── Step 0: Map Drawing ─────────────────────────────────────────────────
+  // Step 0: Map Drawing
   if (step === 0) {
     return (
       <View style={{ flex: 1 }}>
@@ -275,7 +331,7 @@ export default function PlantScreen() {
             {farmBoundary.length === 0
               ? 'Tap on the map to mark your farm boundary'
               : `${farmBoundary.length} point${farmBoundary.length !== 1 ? 's' : ''} added${
-                  farmBoundary.length >= 3 ? ` — Area: ~${farmArea.toFixed(2)} ha` : ' (need at least 3)'
+                  farmBoundary.length >= 3 ? ` - Area: ~${farmArea.toFixed(2)} ha` : ' (need at least 3)'
                 }`}
           </Text>
         </View>
@@ -342,7 +398,7 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 1: Crop Selection ───────────────────────────────────────────────
+  // Step 1: Crop Selection
   if (step === 1) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -392,7 +448,7 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 2: AI Plan ─────────────────────────────────────────────────────
+  // Step 2: AI Plan
   if (step === 2) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -426,20 +482,147 @@ export default function PlantScreen() {
               )}
             </View>
 
-            {/* AI Plan text */}
+            {/* Interactive AI plan */}
             {planSections.length > 0 ? (
-              planSections.map((section, idx) => (
-                <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
-                  <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionIndex}>{idx + 1}</Text>
-                    <Text style={styles.sectionTitle}>{section.title}</Text>
+              <>
+                <View style={styles.progressCard}>
+                  <View style={styles.progressHeader}>
+                    <Text style={styles.progressTitle}>Plan Progress</Text>
+                    <Text style={styles.progressMeta}>
+                      {completedActionCount}/{totalActionCount} tasks complete
+                    </Text>
                   </View>
-                  <Text style={styles.sectionBody}>{section.content}</Text>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+                  </View>
+                  <Text style={styles.progressSubtitle}>
+                    {progressPercent === 100
+                      ? 'All action items completed. You can save this plan.'
+                      : `Complete the checklist below to stay on track (${progressPercent}%).`}
+                  </Text>
+                  {nextIncompleteSectionIdx >= 0 && (
+                    <TouchableOpacity
+                      style={styles.jumpBtn}
+                      onPress={() =>
+                        setExpandedSections((prev) => ({ ...prev, [nextIncompleteSectionIdx]: true }))
+                      }
+                    >
+                      <Ionicons name="navigate" size={15} color={colors.info} />
+                      <Text style={styles.jumpBtnText}>
+                        Focus next step: {nextIncompleteSectionIdx + 1}. {planSections[nextIncompleteSectionIdx].title}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-              ))
+
+                {planSections.map((section, idx) => {
+                  const completedInSection = getCompletedActionsForSection(section, idx);
+                  const done = isSectionCompleted(section, idx);
+                  const isExpanded = !!expandedSections[idx];
+
+                  const toggleAction = (actionIdx) => {
+                    setCompletedActions((prev) => {
+                      const key = getActionKey(idx, actionIdx);
+                      return { ...prev, [key]: !prev[key] };
+                    });
+                  };
+
+                  const markStepDone = () => {
+                    setCompletedActions((prev) => {
+                      const next = { ...prev };
+                      section.actionItems.forEach((_, actionIdx) => {
+                        next[getActionKey(idx, actionIdx)] = true;
+                      });
+                      return next;
+                    });
+                  };
+
+                  const goNextStep = () => {
+                    if (idx >= planSections.length - 1) return;
+                    setExpandedSections((prev) => ({ ...prev, [idx + 1]: true }));
+                  };
+
+                  return (
+                    <View
+                      key={`${section.title}-${idx}`}
+                      style={[styles.sectionCard, done && styles.sectionCardCompleted]}
+                    >
+                      <TouchableOpacity
+                        style={styles.sectionHeader}
+                        onPress={() =>
+                          setExpandedSections((prev) => ({ ...prev, [idx]: !prev[idx] }))
+                        }
+                      >
+                        <Text style={styles.sectionIndex}>{idx + 1}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sectionTitle}>{section.title}</Text>
+                          <Text style={styles.sectionMeta}>
+                            {completedInSection}/{section.actionItems.length} completed
+                          </Text>
+                        </View>
+                        {done && (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={18}
+                            color={colors.primary}
+                            style={{ marginRight: 6 }}
+                          />
+                        )}
+                        <Ionicons
+                          name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                          size={18}
+                          color={colors.textMuted}
+                        />
+                      </TouchableOpacity>
+
+                      {isExpanded && (
+                        <View>
+                          {getSectionTip(section) ? (
+                            <Text style={styles.sectionBody}>Tip: {getSectionTip(section)}</Text>
+                          ) : null}
+
+                          {section.actionItems.map((item, actionIdx) => {
+                            const checked = !!completedActions[getActionKey(idx, actionIdx)];
+                            return (
+                              <TouchableOpacity
+                                key={`${idx}-action-${actionIdx}`}
+                                style={styles.actionRow}
+                                onPress={() => toggleAction(actionIdx)}
+                              >
+                                <Ionicons
+                                  name={checked ? 'checkbox' : 'square-outline'}
+                                  size={20}
+                                  color={checked ? colors.primary : colors.textMuted}
+                                  style={{ marginRight: spacing.sm }}
+                                />
+                                <Text style={[styles.actionText, checked && styles.actionTextDone]}>{item}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+
+                          <View style={styles.sectionActions}>
+                            <TouchableOpacity style={styles.sectionBtn} onPress={markStepDone}>
+                              <Ionicons name="checkmark-done" size={16} color={colors.primary} />
+                              <Text style={styles.sectionBtnText}>Mark Step Done</Text>
+                            </TouchableOpacity>
+                            {idx < planSections.length - 1 && (
+                              <TouchableOpacity style={styles.sectionBtn} onPress={goNextStep}>
+                                <Ionicons name="arrow-forward" size={16} color={colors.primary} />
+                                <Text style={styles.sectionBtnText}>Next Step</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </>
             ) : (
               <View style={styles.planCard}>
-                <Text style={styles.planText}>{aiPlan}</Text>
+                <Text style={styles.planText}>
+                  No actionable steps were extracted from this response. Tap Back and regenerate the plan.
+                </Text>
               </View>
             )}
 
@@ -459,7 +642,7 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 3: Review & Save ────────────────────────────────────────────────
+  // Step 3: Review & Save
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StepIndicator />
@@ -479,13 +662,15 @@ export default function PlantScreen() {
           )}
         </View>
 
-        <View style={[styles.planCard, { maxHeight: 200 }]}>
-          <Text style={[styles.planText, { fontSize: 13 }]} numberOfLines={10}>
-            {planSections.length > 0
-              ? planSections
-                  .map((s, i) => `${i + 1}. ${s.title}: ${s.content}`)
-                  .join('\n\n')
-              : aiPlan}
+        <View style={styles.planCard}>
+          <Text style={[styles.planText, { fontSize: 13, marginBottom: spacing.xs }]}>
+            {planSections.length} interactive step{planSections.length === 1 ? '' : 's'} prepared
+          </Text>
+          <Text style={[styles.planText, { fontSize: 13, marginBottom: spacing.sm }]}>
+            {completedActionCount}/{totalActionCount} checklist items completed
+          </Text>
+          <Text style={[styles.planText, { fontSize: 13 }]} numberOfLines={8}>
+            {planSections.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
           </Text>
         </View>
 
@@ -686,6 +871,47 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   weatherText: { fontSize: 12, color: colors.earth },
+  progressCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    ...shadow.sm,
+  },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressTitle: { ...typography.h4, color: colors.textPrimary },
+  progressMeta: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  progressTrack: {
+    marginTop: spacing.sm,
+    height: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
+  progressSubtitle: {
+    marginTop: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  jumpBtn: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#E3F2FD',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  jumpBtnText: { fontSize: 12, color: colors.info, fontWeight: '700' },
 
   planCard: {
     backgroundColor: colors.surface,
@@ -704,7 +930,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.sm,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center' },
   sectionIndex: {
     width: 24,
     height: 24,
@@ -719,7 +945,31 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
-  sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
+  sectionMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21, marginTop: spacing.sm },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.sm,
+  },
+  actionText: { flex: 1, fontSize: 13, color: colors.textPrimary, lineHeight: 20 },
+  actionTextDone: { textDecorationLine: 'line-through', color: colors.textMuted },
+  sectionActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' },
+  sectionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    gap: 4,
+    backgroundColor: '#F1F8F1',
+  },
+  sectionBtnText: { fontSize: 12, color: colors.primaryDark, fontWeight: '700' },
+  sectionCardCompleted: {
+    backgroundColor: '#F8FFF8',
+  },
 
   reviewCard: {
     backgroundColor: colors.surface,
@@ -750,3 +1000,4 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
   },
 });
+

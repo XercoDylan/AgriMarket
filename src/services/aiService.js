@@ -9,17 +9,17 @@ Location: ${lat.toFixed(4)}°, ${lon.toFixed(4)}°
 Current Weather: ${weatherSummary}
 Date: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
 
-Provide a concise plan with these sections:
-1. **Timeline** – Week-by-week schedule from soil prep to harvest
-2. **Soil Preparation** – What to do before planting
-3. **Planting** – Spacing, depth, density
-4. **Water & Irrigation** – Requirements and schedule
-5. **Fertilizer** – Type, timing, quantities
-6. **Pest & Disease Management** – Common threats and prevention
-7. **Expected Yield** – Estimated kg per hectare
-8. **Total Days to Harvest** – Realistic estimate
+Rather than one long block of text, present the recommendations as a **step-by-step walkthrough** that a farmer can follow interactively. Organize the output as numbered steps or clear sections with short action items followed by a brief explanation. After each step include a prompt such as "When you're ready, move to the next step" or an equivalent call‑to‑action so the farmer feels guided through the process. Structure the plan to roughly cover:
+1. Timeline from soil preparation through harvest
+2. Soil preparation tasks
+3. Planting details (spacing, depth, density)
+4. Water & irrigation schedule
+5. Fertilizer recommendations
+6. Pest & disease prevention
+7. Expected yield estimate
+8. Estimated days to harvest
 
-Keep advice practical and suited for small-to-medium African farmers. Be specific with numbers.`;
+Keep advice practical, concise, and suited for small-to-medium African farmers; use bullet points or numbered lists and avoid large paragraphs.`;
 
   if (!CLAUDE_API_KEY) {
     throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY in .env.');
