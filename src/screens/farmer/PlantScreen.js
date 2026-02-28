@@ -26,22 +26,22 @@ const { width } = Dimensions.get('window');
 const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
 const CROPS = [
-  { id: 'maize', name: 'Maize', emoji: '🌽' },
   { id: 'cassava', name: 'Cassava', emoji: '🥔' },
-  { id: 'yam', name: 'Yam', emoji: '🍠' },
-  { id: 'rice', name: 'Rice', emoji: '🍚' },
-  { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
-  { id: 'tomato', name: 'Tomato', emoji: '🍅' },
+  { id: 'cocoa', name: 'Cocoa', emoji: '🍫' },
+  { id: 'cotton', name: 'Cotton', emoji: '🌱' },
+  { id: 'cowpea', name: 'Cowpea', emoji: '🫘' },
+  { id: 'groundnut', name: 'Groundnut', emoji: '🥜' },
+  { id: 'maize', name: 'Maize', emoji: '🌽' },
+  { id: 'millet', name: 'Millet', emoji: '🌾' },
+  { id: 'okra', name: 'Okra', emoji: '🌿' },
   { id: 'onion', name: 'Onion', emoji: '🧅' },
   { id: 'pepper', name: 'Pepper', emoji: '🌶️' },
-  { id: 'groundnut', name: 'Groundnut', emoji: '🥜' },
-  { id: 'cowpea', name: 'Cowpea', emoji: '🫘' },
   { id: 'plantain', name: 'Plantain', emoji: '🍌' },
-  { id: 'okra', name: 'Okra', emoji: '🌿' },
-  { id: 'millet', name: 'Millet', emoji: '🌾' },
-  { id: 'cotton', name: 'Cotton', emoji: '🌱' },
+  { id: 'rice', name: 'Rice', emoji: '🍚' },
+  { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
   { id: 'sugarcane', name: 'Sugarcane', emoji: '🎋' },
-  { id: 'cocoa', name: 'Cocoa', emoji: '🍫' },
+  { id: 'tomato', name: 'Tomato', emoji: '🍅' },
+  { id: 'yam', name: 'Yam', emoji: '🍠' },
 ];
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
