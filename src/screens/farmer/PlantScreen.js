@@ -23,6 +23,16 @@ import { colors, spacing, borderRadius, typography, shadow } from '../../config/
 // Edge padding when fitting map to boundary so the last corner isn't hidden by footer/controls
 const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
+function isValidMapCoord(coord) {
+  if (!coord || typeof coord.latitude !== 'number' || typeof coord.longitude !== 'number') return false;
+  const { latitude, longitude } = coord;
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) return false;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return false;
+  // Reject (0,0) and near-zero: common spurious value that can make marker jump to top-left
+  if (Math.abs(latitude) < 1e-6 && Math.abs(longitude) < 1e-6) return false;
+  return true;
+}
+
 const CROPS = [
   { id: 'cassava', name: 'Cassava', emoji: '\u{1F954}' },
   { id: 'cocoa', name: 'Cocoa', emoji: '\u{1F36B}' },
@@ -265,6 +275,10 @@ export default function PlantScreen() {
   const [isAnalyzingPlot, setIsAnalyzingPlot] = useState(false);
   const [analysisStepIdx, setAnalysisStepIdx] = useState(0);
   const [analysisTick, setAnalysisTick] = useState(0);
+  const [movingPointIndex, setMovingPointIndex] = useState(null);
+  const markerDragActiveRef = useRef(null); // idx when a real drag is in progress, so we don't apply tiny spurious moves from taps
+  const [draggingMarkerIndex, setDraggingMarkerIndex] = useState(null); // for tracksViewChanges so only active marker updates
+  const movingPointTapTimeRef = useRef(0); // timestamp when point was selected by tap; ignore drag events for a short time after
   const scanPulse = useRef(new Animated.Value(0)).current;
 
   const farmCenter =
@@ -397,6 +411,14 @@ export default function PlantScreen() {
   // Fit map to show all boundary points so the last numbered corner is visible.
   // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
   useEffect(() => {
+    if (movingPointIndex !== null && (step !== 0 || movingPointIndex >= farmBoundary.length)) {
+      setMovingPointIndex(null);
+      setDraggingMarkerIndex(null);
+      markerDragActiveRef.current = null;
+    }
+  }, [step, farmBoundary.length, movingPointIndex]);
+
+  useEffect(() => {
     if (step !== 0 || farmBoundary.length === 0 || !mapRef.current) return;
     const lastPoint = farmBoundary[farmBoundary.length - 1];
     // If we already have points and the new one is within the visible region (with margin), skip fit
@@ -433,7 +455,77 @@ export default function PlantScreen() {
 
   const handleMapPress = (e) => {
     const coord = e.nativeEvent.coordinate;
+    if (!isValidMapCoord(coord)) return;
+    if (movingPointIndex !== null) {
+      setFarmBoundary((prev) => {
+        const next = [...prev];
+        next[movingPointIndex] = coord;
+        return next;
+      });
+      setMovingPointIndex(null);
+      return;
+    }
+    // If tap is on/near an existing point, select it for moving instead of adding a duplicate
+    const threshold = 0.00015; // ~15m in degrees, avoids duplicate when map gets same tap as marker
+    const hitIdx = farmBoundary.findIndex(
+      (p) =>
+        Math.abs(p.latitude - coord.latitude) <= threshold &&
+        Math.abs(p.longitude - coord.longitude) <= threshold
+    );
+    if (hitIdx !== -1) {
+      setMovingPointIndex(hitIdx);
+      movingPointTapTimeRef.current = Date.now();
+      return;
+    }
     setFarmBoundary((prev) => [...prev, coord]);
+  };
+
+  const handleMarkerDragEnd = (idx, e) => {
+    const newCoord = e.nativeEvent.coordinate;
+    if (!isValidMapCoord(newCoord)) return;
+    // Ignore spurious drag end right after tap (same marker was just selected)
+    if (movingPointIndex === idx && Date.now() - movingPointTapTimeRef.current < 320) return;
+    const current = farmBoundary[idx];
+    if (current) {
+      const maxJumpDeg = 0.008; // ~800m – reject impossible single-frame jump
+      const dLat = Math.abs(current.latitude - newCoord.latitude);
+      const dLng = Math.abs(current.longitude - newCoord.longitude);
+      if (dLat >= maxJumpDeg || dLng >= maxJumpDeg) return;
+    }
+    setFarmBoundary((prev) => {
+      const next = [...prev];
+      next[idx] = newCoord;
+      return next;
+    });
+    markerDragActiveRef.current = null;
+    setDraggingMarkerIndex(null);
+    setMovingPointIndex(null);
+  };
+
+  const handleMarkerDrag = (idx, e) => {
+    const newCoord = e.nativeEvent.coordinate;
+    if (!isValidMapCoord(newCoord)) return;
+    const current = farmBoundary[idx];
+    if (!current) return;
+    // Ignore any drag event shortly after this marker was selected by tap (prevents jump from spurious native drag)
+    if (movingPointIndex === idx && Date.now() - movingPointTapTimeRef.current < 320) return;
+    // Reject impossible single-frame jump (e.g. to top-left / 0,0)
+    const maxJumpDeg = 0.008; // ~800m
+    const dLat = Math.abs(current.latitude - newCoord.latitude);
+    const dLng = Math.abs(current.longitude - newCoord.longitude);
+    if (dLat >= maxJumpDeg || dLng >= maxJumpDeg) return;
+    // Ignore tiny moves from taps (spurious onDrag before user actually drags)
+    const minMoveDeg = 0.00008; // ~8–9 m
+    const movedEnough = dLat >= minMoveDeg || dLng >= minMoveDeg;
+    const alreadyDragging = markerDragActiveRef.current === idx;
+    if (!movedEnough && !alreadyDragging) return;
+    markerDragActiveRef.current = idx;
+    setDraggingMarkerIndex(idx);
+    setFarmBoundary((prev) => {
+      const next = [...prev];
+      next[idx] = newCoord;
+      return next;
+    });
   };
 
   const undoLastPoint = () => {
@@ -589,7 +681,7 @@ export default function PlantScreen() {
               ? 'Tap on the map to mark your farm boundary'
               : `${farmBoundary.length} point${farmBoundary.length !== 1 ? 's' : ''} added${
                   farmBoundary.length >= 3 ? ` - Area: ~${farmArea.toFixed(2)} ha` : ' (need at least 3)'
-                }`}
+                }. Tap a point then tap the map to move it, or long-press to drag.`}
           </Text>
         </View>
 
@@ -608,8 +700,16 @@ export default function PlantScreen() {
               key={idx}
               coordinate={coord}
               anchor={{ x: 0.5, y: 0.5 }}
+              draggable
+              tracksViewChanges={movingPointIndex === idx || draggingMarkerIndex === idx}
+              onPress={() => {
+                movingPointTapTimeRef.current = Date.now();
+                setMovingPointIndex(idx);
+              }}
+              onDrag={(e) => handleMarkerDrag(idx, e)}
+              onDragEnd={(e) => handleMarkerDragEnd(idx, e)}
             >
-              <View style={styles.mapMarker}>
+              <View style={[styles.mapMarker, movingPointIndex === idx && styles.mapMarkerMoving]}>
                 <Text style={styles.mapMarkerText}>{idx + 1}</Text>
               </View>
             </Marker>
@@ -1144,6 +1244,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#fff',
+  },
+  mapMarkerMoving: {
+    borderWidth: 3,
+    borderColor: colors.warning,
+    transform: [{ scale: 1.15 }],
   },
   mapMarkerText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   scanMarker: {
