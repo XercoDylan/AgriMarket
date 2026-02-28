@@ -8,8 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
-  Modal,
-  Dimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import MapView, { Marker, Polygon } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -20,34 +20,142 @@ import { generateFarmingPlan } from '../../services/aiService';
 import { savePlantingPlan, calculateFarmArea, orderBoundaryPoints } from '../../services/plantService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 
-const { width } = Dimensions.get('window');
-
 // Edge padding when fitting map to boundary so the last corner isn't hidden by footer/controls
 const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
 const CROPS = [
-  { id: 'cassava', name: 'Cassava', emoji: '🥔' },
-  { id: 'cocoa', name: 'Cocoa', emoji: '🍫' },
-  { id: 'cotton', name: 'Cotton', emoji: '🌱' },
-  { id: 'cowpea', name: 'Cowpea', emoji: '🫘' },
-  { id: 'groundnut', name: 'Groundnut', emoji: '🥜' },
-  { id: 'maize', name: 'Maize', emoji: '🌽' },
-  { id: 'millet', name: 'Millet', emoji: '🌾' },
-  { id: 'okra', name: 'Okra', emoji: '🌿' },
-  { id: 'onion', name: 'Onion', emoji: '🧅' },
-  { id: 'pepper', name: 'Pepper', emoji: '🌶️' },
-  { id: 'plantain', name: 'Plantain', emoji: '🍌' },
-  { id: 'rice', name: 'Rice', emoji: '🍚' },
-  { id: 'sorghum', name: 'Sorghum', emoji: '🌾' },
-  { id: 'sugarcane', name: 'Sugarcane', emoji: '🎋' },
-  { id: 'tomato', name: 'Tomato', emoji: '🍅' },
-  { id: 'yam', name: 'Yam', emoji: '🍠' },
+  { id: 'maize', name: 'Maize', emoji: '\u{1F33D}' },
+  { id: 'cassava', name: 'Cassava', emoji: '\u{1F954}' },
+  { id: 'yam', name: 'Yam', emoji: '\u{1F360}' },
+  { id: 'rice', name: 'Rice', emoji: '\u{1F35A}' },
+  { id: 'sorghum', name: 'Sorghum', emoji: '\u{1F33E}' },
+  { id: 'tomato', name: 'Tomato', emoji: '\u{1F345}' },
+  { id: 'onion', name: 'Onion', emoji: '\u{1F9C5}' },
+  { id: 'pepper', name: 'Pepper', emoji: '\u{1F336}\uFE0F' },
+  { id: 'groundnut', name: 'Groundnut', emoji: '\u{1F95C}' },
+  { id: 'cowpea', name: 'Cowpea', emoji: '\u{1FAD8}' },
+  { id: 'plantain', name: 'Plantain', emoji: '\u{1F34C}' },
+  { id: 'okra', name: 'Okra', emoji: '\u{1F33F}' },
+  { id: 'millet', name: 'Millet', emoji: '\u{1F33E}' },
+  { id: 'cotton', name: 'Cotton', emoji: '\u{1F331}' },
+  { id: 'sugarcane', name: 'Sugarcane', emoji: '\u{1F38B}' },
+  { id: 'cocoa', name: 'Cocoa', emoji: '\u{1F36B}' },
 ];
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
 
+function sanitizePlainText(value) {
+  if (!value) return '';
+  return String(value)
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .replace(/`+/g, '')
+    .replace(/[^\x20-\x7E\n]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function safeJsonParse(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function extractLikelyJson(text) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+
+  const direct = safeJsonParse(trimmed);
+  if (direct) return direct;
+
+  const fenced = trimmed.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    const parsed = safeJsonParse(fenced[1].trim());
+    if (parsed) return parsed;
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+    const parsed = safeJsonParse(candidate);
+    if (parsed) return parsed;
+
+    // Last-pass cleanup for trailing commas from imperfect model output.
+    const loosened = candidate.replace(/,\s*([}\]])/g, '$1');
+    const parsedLoosened = safeJsonParse(loosened);
+    if (parsedLoosened) return parsedLoosened;
+  }
+
+  return null;
+}
+
+function parseStructuredPlan(planText) {
+  if (!planText || typeof planText !== 'string') return null;
+  const raw = extractLikelyJson(planText);
+  if (!raw) return null;
+
+  try {
+    if (!Array.isArray(raw?.steps) || raw.steps.length === 0) return null;
+
+    const steps = raw.steps
+      .map((step, stepIdx) => {
+        const actions = Array.isArray(step?.actions)
+          ? step.actions
+              .map((action, actionIdx) => ({
+                id: `${stepIdx}-${actionIdx}`,
+                task: sanitizePlainText(action?.task),
+                why: sanitizePlainText(action?.why),
+                when: sanitizePlainText(action?.when),
+                warning: sanitizePlainText(action?.warning),
+              }))
+              .filter((a) => a.task)
+          : [];
+
+        return {
+          title: sanitizePlainText(step?.title) || `Step ${stepIdx + 1}`,
+          phase: sanitizePlainText(step?.phase).toLowerCase(),
+          startDay: Number.isFinite(Number(step?.start_day)) ? Number(step.start_day) : null,
+          endDay: Number.isFinite(Number(step?.end_day)) ? Number(step.end_day) : null,
+          priority: sanitizePlainText(step?.priority).toLowerCase() || 'medium',
+          reason: sanitizePlainText(step?.reason),
+          actions,
+        };
+      })
+      .filter((s) => s.actions.length > 0);
+
+    if (steps.length === 0) return null;
+
+    const alerts = Array.isArray(raw?.alerts)
+      ? raw.alerts
+          .map((a) => ({
+            title: sanitizePlainText(a?.title),
+            message: sanitizePlainText(a?.message),
+            severity: sanitizePlainText(a?.severity).toLowerCase() || 'info',
+          }))
+          .filter((a) => a.title || a.message)
+      : [];
+
+    return {
+      summary: {
+        objective: sanitizePlainText(raw?.summary?.objective),
+        keyDecision: sanitizePlainText(raw?.summary?.key_decision),
+      },
+      alerts,
+      steps,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parsePlanSections(planText) {
   if (!planText || typeof planText !== 'string') return [];
+  // If response looks like JSON but failed structured parse, don't render broken JSON tokens as tasks.
+  if (/"summary"\s*:/.test(planText) && /"steps"\s*:/.test(planText)) return [];
 
   const lines = planText.replace(/\r/g, '').split('\n');
   const sections = [];
@@ -55,30 +163,65 @@ function parsePlanSections(planText) {
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+    if (!line) continue;
+    const isJsonNoise =
+      /^```/.test(line) ||
+      /^[{}\[\],]+$/.test(line) ||
+      /^"[\w-]+"\s*:\s*[\[{]?$/.test(line) ||
+      /^"[\w-]+"\s*:\s*.+,?$/.test(line);
+    if (isJsonNoise) continue;
+
     const headingMatch =
-      line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*[–-]?\s*(.*)$/) ||
-      line.match(/^\d+\.\s*(.+?):\s*(.*)$/);
+      line.match(/^\d+\.\s*\*\*(.+?)\*\*\s*-?\s*(.*)$/) ||
+      line.match(/^\d+\.\s*(.+?):\s*(.*)$/) ||
+      line.match(/^(?:step\s*)?\d+\s*[-.:)]\s*(.+?)(?::\s*(.*))?$/i);
 
     if (headingMatch) {
       if (current) sections.push(current);
       current = {
         title: headingMatch[1].trim(),
         content: headingMatch[2]?.trim() || '',
+        actionItems: [],
       };
       continue;
     }
 
+    const actionMatch = line.match(/^(?:[-*]\s+|\d+[\).]\s+)(.+)$/);
+    if (actionMatch) {
+      if (!current) {
+        current = { title: 'Plan Overview', content: '', actionItems: [] };
+      }
+      current.actionItems.push(actionMatch[1].trim());
+      continue;
+    }
+
     if (!current) {
-      current = { title: 'Plan Overview', content: line };
+      current = { title: 'Plan Overview', content: line, actionItems: [] };
     } else {
       current.content = `${current.content}${current.content ? '\n' : ''}${line}`.trim();
     }
   }
 
   if (current) sections.push(current);
-  return sections.filter((s) => s.content);
-}
+  return sections
+    .map((section) => {
+      if (section.actionItems.length > 0) return section;
 
+      const fallbackActions = section.content
+        .split(/\n|;\s+|\.\s+/)
+        .map((s) => sanitizePlainText(s))
+        .filter((s) => s.length >= 8)
+        .slice(0, 3);
+
+      return {
+        ...section,
+        title: sanitizePlainText(section.title),
+        content: sanitizePlainText(section.content),
+        actionItems: fallbackActions,
+      };
+    })
+    .filter((s) => s.content || s.actionItems.length > 0);
+}
 export default function PlantScreen() {
   const { user, userProfile } = useAuth();
   const mapRef = useRef(null);
@@ -100,7 +243,19 @@ export default function PlantScreen() {
 
   const orderedBoundary = orderBoundaryPoints(farmBoundary);
   const farmArea = calculateFarmArea(orderedBoundary);
-  const planSections = parsePlanSections(aiPlan);
+  const structuredPlan = parseStructuredPlan(aiPlan);
+  const planSections = structuredPlan
+    ? structuredPlan.steps.map((step) => ({
+        title: step.title,
+        content: step.reason,
+        actionItems: step.actions.map((a) => a.task),
+      }))
+    : parsePlanSections(aiPlan);
+  const [completedActions, setCompletedActions] = useState({});
+  const [currentTaskIdx, setCurrentTaskIdx] = useState(0);
+  const taskOpacity = useRef(new Animated.Value(1)).current;
+  const taskTranslateY = useRef(new Animated.Value(0)).current;
+
   const farmCenter =
     farmBoundary.length > 0
       ? {
@@ -108,6 +263,93 @@ export default function PlantScreen() {
           lon: farmBoundary.reduce((s, c) => s + c.longitude, 0) / farmBoundary.length,
         }
       : null;
+
+  useEffect(() => {
+    setCompletedActions({});
+    setCurrentTaskIdx(0);
+  }, [aiPlan]);
+
+  const getActionKey = (sectionIdx, actionIdx) => `${sectionIdx}-${actionIdx}`;
+  const getCompletedActionsForSection = (section, sectionIdx) =>
+    section.actionItems.filter((_, actionIdx) => completedActions[getActionKey(sectionIdx, actionIdx)]).length;
+  const isSectionCompleted = (section, sectionIdx) =>
+    section.actionItems.length > 0 &&
+    getCompletedActionsForSection(section, sectionIdx) === section.actionItems.length;
+  const totalActionCount = planSections.reduce((sum, section) => sum + section.actionItems.length, 0);
+  const completedActionCount = planSections.reduce(
+    (sum, section, sectionIdx) => sum + getCompletedActionsForSection(section, sectionIdx),
+    0
+  );
+  const getSectionTip = (section) => {
+    const source = section?.content?.trim();
+    if (!source) return null;
+    const firstSentence = source.split(/(?<=[.!?])\s+/)[0]?.trim() || source;
+    return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
+  };
+  const walkthroughTasks = structuredPlan
+    ? structuredPlan.steps.flatMap((step, sectionIdx) =>
+        step.actions.map((action, actionIdx) => ({
+          text: action.task,
+          why: action.why,
+          when: action.when,
+          warning: action.warning,
+          sectionIdx,
+          actionIdx,
+          sectionTitle: step.title,
+          tip: step.reason || action.why,
+          priority: step.priority || 'medium',
+          phase: step.phase || 'planting',
+          dayWindow:
+            Number.isFinite(step.startDay) && Number.isFinite(step.endDay)
+              ? `Day ${step.startDay}-${step.endDay}`
+              : action.when || 'Schedule as advised',
+        }))
+      )
+    : planSections.flatMap((section, sectionIdx) =>
+        section.actionItems.map((text, actionIdx) => ({
+          text,
+          why: '',
+          when: '',
+          warning: '',
+          sectionIdx,
+          actionIdx,
+          sectionTitle: section.title,
+          tip: getSectionTip(section),
+          priority: 'medium',
+          phase: 'planting',
+          dayWindow: 'Follow recommended timing',
+        }))
+      );
+  const totalTaskCount = walkthroughTasks.length;
+  const boundedTaskIdx = totalTaskCount > 0 ? Math.min(currentTaskIdx, totalTaskCount - 1) : 0;
+  const currentTask = totalTaskCount > 0 ? walkthroughTasks[boundedTaskIdx] : null;
+  const progressPercent = totalActionCount > 0 ? Math.round((completedActionCount / totalActionCount) * 100) : 0;
+  useEffect(() => {
+    if (totalTaskCount === 0) return;
+    if (currentTaskIdx > totalTaskCount - 1) {
+      setCurrentTaskIdx(totalTaskCount - 1);
+    }
+  }, [currentTaskIdx, totalTaskCount]);
+
+  useEffect(() => {
+    if (!currentTask) return;
+    taskOpacity.setValue(0);
+    taskTranslateY.setValue(16);
+    Animated.parallel([
+      Animated.timing(taskOpacity, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(taskTranslateY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [boundedTaskIdx]);
 
   // Fit map to show all boundary points so the last numbered corner is visible.
   // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
@@ -183,7 +425,7 @@ export default function PlantScreen() {
           weatherSummary = formatWeatherSummary(weatherData);
           setWeather(weatherData);
         } catch {
-          // Weather optional – continue without it
+          // Weather optional - continue without it
         }
       }
       const plan = await generateFarmingPlan({
@@ -244,7 +486,7 @@ export default function PlantScreen() {
     }
   };
 
-  // ─── Step Indicator ─────────────────────────────────────────────────────
+  // Step Indicator
   const StepIndicator = () => (
     <View style={styles.stepIndicator}>
       {STEPS.map((label, idx) => (
@@ -264,7 +506,7 @@ export default function PlantScreen() {
     </View>
   );
 
-  // ─── Step 0: Map Drawing ─────────────────────────────────────────────────
+  // Step 0: Map Drawing
   if (step === 0) {
     return (
       <View style={{ flex: 1 }}>
@@ -275,7 +517,7 @@ export default function PlantScreen() {
             {farmBoundary.length === 0
               ? 'Tap on the map to mark your farm boundary'
               : `${farmBoundary.length} point${farmBoundary.length !== 1 ? 's' : ''} added${
-                  farmBoundary.length >= 3 ? ` — Area: ~${farmArea.toFixed(2)} ha` : ' (need at least 3)'
+                  farmBoundary.length >= 3 ? ` - Area: ~${farmArea.toFixed(2)} ha` : ' (need at least 3)'
                 }`}
           </Text>
         </View>
@@ -342,7 +584,7 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 1: Crop Selection ───────────────────────────────────────────────
+  // Step 1: Crop Selection
   if (step === 1) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -392,8 +634,64 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 2: AI Plan ─────────────────────────────────────────────────────
+  // Step 2: AI Plan
   if (step === 2) {
+    const goToTask = (nextIdx) => {
+      if (totalTaskCount === 0) return;
+      const bounded = Math.max(0, Math.min(nextIdx, totalTaskCount - 1));
+      setCurrentTaskIdx(bounded);
+    };
+
+    const isCurrentTaskDone = currentTask
+      ? !!completedActions[getActionKey(currentTask.sectionIdx, currentTask.actionIdx)]
+      : false;
+
+    const toggleCurrentTask = () => {
+      if (!currentTask) return;
+      const key = getActionKey(currentTask.sectionIdx, currentTask.actionIdx);
+      const wasChecked = !!completedActions[key];
+      setCompletedActions((prev) => ({ ...prev, [key]: !prev[key] }));
+      if (!wasChecked && boundedTaskIdx < totalTaskCount - 1) {
+        setTimeout(() => goToTask(boundedTaskIdx + 1), 180);
+      }
+    };
+
+    const completeAndAdvance = () => {
+      if (!currentTask) return;
+      const key = getActionKey(currentTask.sectionIdx, currentTask.actionIdx);
+      setCompletedActions((prev) => ({ ...prev, [key]: true }));
+      if (boundedTaskIdx < totalTaskCount - 1) {
+        goToTask(boundedTaskIdx + 1);
+      }
+    };
+    const alertItems = structuredPlan?.alerts || [];
+    const phaseIconMap = {
+      soil: 'earth-outline',
+      planting: 'leaf-outline',
+      water: 'water-outline',
+      fertilizer: 'flask-outline',
+      protection: 'shield-checkmark-outline',
+      harvest: 'nutrition-outline',
+    };
+    const phaseIcon = currentTask ? phaseIconMap[currentTask.phase] || 'leaf-outline' : 'leaf-outline';
+    const priorityStyleMap = {
+      low: { bg: '#E8F5E9', text: colors.primaryDark, label: 'Low Priority' },
+      medium: { bg: '#FFF8E1', text: colors.warning, label: 'Medium Priority' },
+      high: { bg: '#FFEBEE', text: colors.error, label: 'High Priority' },
+    };
+    const priorityMeta = currentTask ? priorityStyleMap[currentTask.priority] || priorityStyleMap.medium : priorityStyleMap.medium;
+    const activeLat = farmCenter?.lat || region.latitude;
+    const activeLon = farmCenter?.lon || region.longitude;
+    const areaBand =
+      farmArea < 0.5 ? 'Small Plot' : farmArea < 2 ? 'Medium Plot' : 'Large Plot';
+    const currentWeatherSummary = weather ? formatWeatherSummary(weather) : 'Weather data unavailable';
+    const weatherImpact =
+      /rain|storm|showers/i.test(currentWeatherSummary)
+        ? 'Water carefully, avoid oversaturation.'
+        : /hot|heat|sun/i.test(currentWeatherSummary)
+          ? 'Increase moisture retention and mulch.'
+          : 'Maintain normal irrigation cadence.';
+
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <StepIndicator />
@@ -425,23 +723,162 @@ export default function PlantScreen() {
                 </View>
               )}
             </View>
-
-            {/* AI Plan text */}
-            {planSections.length > 0 ? (
-              planSections.map((section, idx) => (
-                <View key={`${section.title}-${idx}`} style={styles.sectionCard}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionIndexCircle}>
-                      <Text style={styles.sectionIndexText}>{idx + 1}</Text>
-                    </View>
-                    <Text style={styles.sectionTitle}>{section.title}</Text>
-                  </View>
-                  <Text style={styles.sectionBody}>{section.content}</Text>
+            {structuredPlan?.summary?.objective ? (
+              <View style={styles.decisionCard}>
+                <Text style={styles.decisionTitle}>AI Decision</Text>
+                <Text style={styles.decisionBody}>{structuredPlan.summary.objective}</Text>
+                {structuredPlan?.summary?.keyDecision ? (
+                  <Text style={styles.decisionKey}>Key call: {structuredPlan.summary.keyDecision}</Text>
+                ) : null}
+              </View>
+            ) : null}
+            <View style={styles.regionCard}>
+              <Text style={styles.regionTitle}>Region Insights</Text>
+              <View style={styles.regionRow}>
+                <View style={styles.regionPill}>
+                  <Ionicons name="locate-outline" size={14} color={colors.primaryDark} />
+                  <Text style={styles.regionPillText}>{activeLat.toFixed(3)}, {activeLon.toFixed(3)}</Text>
                 </View>
-              ))
+                <View style={styles.regionPill}>
+                  <Ionicons name="map-outline" size={14} color={colors.primaryDark} />
+                  <Text style={styles.regionPillText}>{areaBand}</Text>
+                </View>
+              </View>
+              <Text style={styles.regionHint}>{weatherImpact}</Text>
+            </View>
+
+            {/* Guided walkthrough */}
+            {totalTaskCount > 0 ? (
+              <>
+                <View style={styles.progressCard}>
+                  <View style={styles.progressHeader}>
+                    <Text style={styles.progressTitle}>Guided Walkthrough</Text>
+                    <Text style={styles.progressMeta}>
+                      {completedActionCount}/{totalActionCount} done
+                    </Text>
+                  </View>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+                  </View>
+                  <Text style={styles.progressSubtitle}>
+                    Task {boundedTaskIdx + 1} of {totalTaskCount}
+                  </Text>
+                  <View style={styles.dotRow}>
+                    {walkthroughTasks.slice(0, 16).map((_, idx) => (
+                      <View
+                        key={`dot-${idx}`}
+                        style={[
+                          styles.dot,
+                          idx === boundedTaskIdx && styles.dotActive,
+                          idx < boundedTaskIdx && styles.dotDone,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                {alertItems.length > 0 && (
+                  <View style={styles.alertCard}>
+                    <Ionicons name="alert-circle-outline" size={16} color={colors.warning} />
+                    <Text style={styles.alertText}>
+                      {alertItems[0].title}: {alertItems[0].message}
+                    </Text>
+                  </View>
+                )}
+
+                {currentTask && (
+                  <Animated.View
+                    style={[
+                      styles.walkCard,
+                      {
+                        opacity: taskOpacity,
+                        transform: [{ translateY: taskTranslateY }],
+                      },
+                    ]}
+                  >
+                    <View style={styles.walkHeader}>
+                      <View style={styles.walkStepBadge}>
+                        <Text style={styles.walkStepBadgeText}>{currentTask.sectionIdx + 1}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.walkTitle}>{currentTask.sectionTitle}</Text>
+                        <Text style={styles.walkMeta}>One action at a time</Text>
+                      </View>
+                      <Ionicons name={phaseIcon} size={20} color={colors.primaryDark} />
+                    </View>
+
+                    <View style={styles.metaRow}>
+                      <View style={styles.metaChip}>
+                        <Ionicons name="calendar-outline" size={14} color={colors.info} />
+                        <Text style={styles.metaChipText}>{currentTask.dayWindow}</Text>
+                      </View>
+                      <View style={[styles.metaChip, { backgroundColor: priorityMeta.bg }]}>
+                        <Ionicons name="flag-outline" size={14} color={priorityMeta.text} />
+                        <Text style={[styles.metaChipText, { color: priorityMeta.text }]}>
+                          {priorityMeta.label}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {currentTask.tip ? <Text style={styles.walkTip}>Tip: {currentTask.tip}</Text> : null}
+                    {currentTask.why ? (
+                      <View style={styles.whyCard}>
+                        <Text style={styles.whyTitle}>Why this matters</Text>
+                        <Text style={styles.whyText}>{currentTask.why}</Text>
+                      </View>
+                    ) : null}
+                    {currentTask.warning ? (
+                      <View style={styles.warnCard}>
+                        <Ionicons name="warning-outline" size={16} color={colors.error} />
+                        <Text style={styles.warnText}>{currentTask.warning}</Text>
+                      </View>
+                    ) : null}
+
+                    <TouchableOpacity
+                      style={[styles.taskRow, isCurrentTaskDone && styles.taskRowDone]}
+                      onPress={toggleCurrentTask}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons
+                        name={isCurrentTaskDone ? 'checkbox' : 'square-outline'}
+                        size={22}
+                        color={isCurrentTaskDone ? colors.primary : colors.textMuted}
+                        style={{ marginRight: spacing.sm }}
+                      />
+                      <Text style={[styles.taskText, isCurrentTaskDone && styles.taskTextDone]}>
+                        {currentTask.text}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.walkActions}>
+                      <TouchableOpacity
+                        style={[styles.walkBtn, boundedTaskIdx === 0 && styles.walkBtnDisabled]}
+                        onPress={() => goToTask(boundedTaskIdx - 1)}
+                        disabled={boundedTaskIdx === 0}
+                      >
+                        <Ionicons name="arrow-back" size={16} color={colors.primaryDark} />
+                        <Text style={styles.walkBtnText}>Previous</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={styles.walkNextBtn} onPress={completeAndAdvance}>
+                        <Text style={styles.walkNextBtnText}>
+                          {boundedTaskIdx === totalTaskCount - 1 ? 'Complete Task' : 'Complete & Next'}
+                        </Text>
+                        <Ionicons
+                          name={boundedTaskIdx === totalTaskCount - 1 ? 'checkmark' : 'arrow-forward'}
+                          size={16}
+                          color="#fff"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </Animated.View>
+                )}
+              </>
             ) : (
               <View style={styles.planCard}>
-                <Text style={styles.planText}>{aiPlan}</Text>
+                <Text style={styles.planText}>
+                  No actionable steps were extracted from this response. Tap Back and regenerate the plan.
+                </Text>
               </View>
             )}
 
@@ -461,7 +898,7 @@ export default function PlantScreen() {
     );
   }
 
-  // ─── Step 3: Review & Save ────────────────────────────────────────────────
+  // Step 3: Review & Save
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StepIndicator />
@@ -481,13 +918,15 @@ export default function PlantScreen() {
           )}
         </View>
 
-        <View style={[styles.planCard, { maxHeight: 200 }]}>
-          <Text style={[styles.planText, { fontSize: 13 }]} numberOfLines={10}>
-            {planSections.length > 0
-              ? planSections
-                  .map((s, i) => `${i + 1}. ${s.title}: ${s.content}`)
-                  .join('\n\n')
-              : aiPlan}
+        <View style={styles.planCard}>
+          <Text style={[styles.planText, { fontSize: 13, marginBottom: spacing.xs }]}>
+            {planSections.length} interactive step{planSections.length === 1 ? '' : 's'} prepared
+          </Text>
+          <Text style={[styles.planText, { fontSize: 13, marginBottom: spacing.sm }]}>
+            {completedActionCount}/{totalActionCount} checklist items completed
+          </Text>
+          <Text style={[styles.planText, { fontSize: 13 }]} numberOfLines={8}>
+            {planSections.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
           </Text>
         </View>
 
@@ -688,7 +1127,84 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   weatherText: { fontSize: 12, color: colors.earth },
-
+  progressCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    ...shadow.sm,
+  },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressTitle: { ...typography.h4, color: colors.textPrimary },
+  progressMeta: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  progressTrack: {
+    marginTop: spacing.sm,
+    height: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
+  progressSubtitle: {
+    marginTop: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  dotRow: { flexDirection: 'row', marginTop: spacing.sm, gap: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border },
+  dotActive: { backgroundColor: colors.primary, width: 14 },
+  dotDone: { backgroundColor: colors.primaryLight },
+  alertCard: {
+    marginBottom: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFF8E1',
+    borderWidth: 1,
+    borderColor: '#FFE082',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  alertText: { flex: 1, color: colors.earth, fontSize: 12, lineHeight: 18 },
+  decisionCard: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.info,
+  },
+  decisionTitle: { fontSize: 12, fontWeight: '700', color: colors.info, marginBottom: 2 },
+  decisionBody: { fontSize: 13, color: colors.textPrimary, lineHeight: 19 },
+  decisionKey: { fontSize: 12, color: colors.textSecondary, marginTop: 6 },
+  regionCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+  },
+  regionTitle: { fontSize: 12, fontWeight: '700', color: colors.primaryDark, marginBottom: spacing.xs },
+  regionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  regionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F1F8F1',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  regionPillText: { fontSize: 12, color: colors.primaryDark, fontWeight: '600' },
+  regionHint: { marginTop: spacing.xs, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
   planCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
@@ -697,17 +1213,17 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   planText: { fontSize: 14, color: colors.textPrimary, lineHeight: 22 },
-  sectionCard: {
+  walkCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.primaryLighter,
     ...shadow.sm,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  sectionIndexCircle: {
+  walkHeader: { flexDirection: 'row', alignItems: 'center' },
+  walkStepBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -716,13 +1232,91 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: spacing.sm,
   },
-  sectionIndexText: {
+  walkStepBadgeText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '800',
   },
-  sectionTitle: { ...typography.h4, color: colors.textPrimary, flex: 1 },
-  sectionBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
+  walkTitle: { ...typography.h4, color: colors.textPrimary },
+  walkMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  walkTip: { fontSize: 13, color: colors.textSecondary, lineHeight: 20, marginTop: spacing.sm },
+  metaRow: { flexDirection: 'row', gap: 8, marginTop: spacing.sm, flexWrap: 'wrap' },
+  metaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#E3F2FD',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  metaChipText: { fontSize: 12, color: colors.info, fontWeight: '600' },
+  whyCard: {
+    marginTop: spacing.sm,
+    backgroundColor: '#F5F5F0',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.info,
+  },
+  whyTitle: { fontSize: 12, color: colors.info, fontWeight: '700', marginBottom: 2 },
+  whyText: { fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
+  warnCard: {
+    marginTop: spacing.sm,
+    backgroundColor: '#FFEBEE',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  warnText: { flex: 1, fontSize: 12, color: colors.error, lineHeight: 18 },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FAFAFA',
+  },
+  taskRowDone: {
+    backgroundColor: '#E8F5E9',
+    borderColor: colors.primaryLighter,
+  },
+  taskText: { flex: 1, fontSize: 14, color: colors.textPrimary, lineHeight: 21 },
+  taskTextDone: { textDecorationLine: 'line-through', color: colors.textMuted },
+  walkActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  walkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    gap: 4,
+    backgroundColor: '#F1F8F1',
+    minWidth: 120,
+  },
+  walkBtnDisabled: { opacity: 0.45 },
+  walkBtnText: { fontSize: 13, color: colors.primaryDark, fontWeight: '700' },
+  walkNextBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    gap: 4,
+    backgroundColor: colors.primary,
+  },
+  walkNextBtnText: { fontSize: 13, color: '#fff', fontWeight: '700' },
 
   reviewCard: {
     backgroundColor: colors.surface,
@@ -753,3 +1347,4 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
   },
 });
+

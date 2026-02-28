@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "sdkVersion": "54.0.0",
     "splash": {
       "backgroundColor": "#2E7D32"
     },

@@ -11,6 +11,9 @@ import {
   TextInput,
   ScrollView,
   RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -200,43 +203,48 @@ export default function ContractorJobsScreen() {
       {/* Apply Modal */}
       <Modal visible={!!applyingTo} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Apply: {applyingTo?.title}</Text>
-              <TouchableOpacity onPress={() => setApplyingTo(null)}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </TouchableOpacity>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Apply: {applyingTo?.title}</Text>
+                <TouchableOpacity onPress={() => setApplyingTo(null)}>
+                  <Ionicons name="close" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSubtitle}>
+                Send a message to {applyingTo?.farmerName} introducing yourself (optional):
+              </Text>
+              <TextInput
+                style={styles.applyInput}
+                value={applyMessage}
+                onChangeText={setApplyMessage}
+                placeholder="Introduce yourself, your experience, and why you're a good fit..."
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+                returnKeyType="send"
+                blurOnSubmit
+                onSubmitEditing={handleApply}
+              />
+              <View style={styles.modalBtns}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setApplyingTo(null)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalSubmitBtn, submitting && { opacity: 0.7 }]}
+                  onPress={handleApply}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.modalSubmitText}>Send Application</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-            <Text style={styles.modalSubtitle}>
-              Send a message to {applyingTo?.farmerName} introducing yourself (optional):
-            </Text>
-            <TextInput
-              style={styles.applyInput}
-              value={applyMessage}
-              onChangeText={setApplyMessage}
-              placeholder="Introduce yourself, your experience, and why you're a good fit..."
-              placeholderTextColor={colors.textMuted}
-              multiline
-              numberOfLines={5}
-              textAlignVertical="top"
-            />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setApplyingTo(null)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalSubmitBtn, submitting && { opacity: 0.7 }]}
-                onPress={handleApply}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Send Application</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
