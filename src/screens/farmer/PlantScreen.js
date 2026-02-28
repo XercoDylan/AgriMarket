@@ -24,22 +24,22 @@ import { colors, spacing, borderRadius, typography, shadow } from '../../config/
 const MAP_FIT_PADDING = { top: 80, right: 60, bottom: 120, left: 40 };
 
 const CROPS = [
-  { id: 'maize', name: 'Maize', emoji: '\u{1F33D}' },
   { id: 'cassava', name: 'Cassava', emoji: '\u{1F954}' },
-  { id: 'yam', name: 'Yam', emoji: '\u{1F360}' },
-  { id: 'rice', name: 'Rice', emoji: '\u{1F35A}' },
-  { id: 'sorghum', name: 'Sorghum', emoji: '\u{1F33E}' },
-  { id: 'tomato', name: 'Tomato', emoji: '\u{1F345}' },
+  { id: 'cocoa', name: 'Cocoa', emoji: '\u{1F36B}' },
+  { id: 'cotton', name: 'Cotton', emoji: '\u{1F331}' },
+  { id: 'cowpea', name: 'Cowpea', emoji: '\u{1FAD8}' },
+  { id: 'groundnut', name: 'Groundnut', emoji: '\u{1F95C}' },
+  { id: 'maize', name: 'Maize', emoji: '\u{1F33D}' },
+  { id: 'millet', name: 'Millet', emoji: '\u{1F33E}' },
+  { id: 'okra', name: 'Okra', emoji: '\u{1F33F}' },
   { id: 'onion', name: 'Onion', emoji: '\u{1F9C5}' },
   { id: 'pepper', name: 'Pepper', emoji: '\u{1F336}\uFE0F' },
-  { id: 'groundnut', name: 'Groundnut', emoji: '\u{1F95C}' },
-  { id: 'cowpea', name: 'Cowpea', emoji: '\u{1FAD8}' },
   { id: 'plantain', name: 'Plantain', emoji: '\u{1F34C}' },
-  { id: 'okra', name: 'Okra', emoji: '\u{1F33F}' },
-  { id: 'millet', name: 'Millet', emoji: '\u{1F33E}' },
-  { id: 'cotton', name: 'Cotton', emoji: '\u{1F331}' },
+  { id: 'rice', name: 'Rice', emoji: '\u{1F35A}' },
+  { id: 'sorghum', name: 'Sorghum', emoji: '\u{1F33E}' },
   { id: 'sugarcane', name: 'Sugarcane', emoji: '\u{1F38B}' },
-  { id: 'cocoa', name: 'Cocoa', emoji: '\u{1F36B}' },
+  { id: 'tomato', name: 'Tomato', emoji: '\u{1F345}' },
+  { id: 'yam', name: 'Yam', emoji: '\u{1F360}' },
 ];
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
