@@ -13,6 +13,7 @@ import {
   RefreshControl,
   Keyboard,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { createJob, getMyJobs, acceptApplicant, closeJob } from '../../services/jobService';
 import { colors, spacing, borderRadius, typography, shadow } from '../../config/theme';
 import { formatPrice, getCurrencySymbol } from '../../config/currencies';
+import { WHATSAPP_GROUP_INVITE_LINK } from '../../config/api';
 
 const TASK_TYPES = [
   { id: 'planting', label: 'Planting', emoji: '🌱' },
@@ -90,6 +92,44 @@ export default function FarmerJobsScreen() {
     setForm({ title: '', description: '', cropType: '', taskType: '', pay: '', payPeriod: 'per_day', location: '', duration: '' });
   };
 
+  const buildWhatsAppJobMessage = (job, currency) => {
+    const taskType = TASK_TYPES.find((t) => t.id === job.taskType);
+    const lines = [
+      `New Farm Job Posted ${taskType?.emoji || ''}`.trim(),
+      `Title: ${job.title}`,
+      `Task: ${taskType?.label || 'General farm task'}`,
+      `Location: ${job.location}`,
+      `Pay: ${formatPrice(job.pay, currency)}/${job.payPeriod.replace('_', ' ')}`,
+    ];
+    if (job.cropType) lines.push(`Crop: ${job.cropType}`);
+    if (job.duration) lines.push(`Duration: ${job.duration}`);
+    if (job.description) lines.push(`Details: ${job.description}`);
+    if (WHATSAPP_GROUP_INVITE_LINK) lines.push(`Group: ${WHATSAPP_GROUP_INVITE_LINK}`);
+    lines.push('Reply in app to apply.');
+    return lines.join('\n');
+  };
+
+  const shareJobToWhatsApp = async (job) => {
+    const message = buildWhatsAppJobMessage(job, userProfile?.currency);
+    const encoded = encodeURIComponent(message);
+    const primaryUrl = `whatsapp://send?text=${encoded}`;
+    const fallbackUrl = `https://wa.me/?text=${encoded}`;
+
+    try {
+      const canUseAppScheme = await Linking.canOpenURL(primaryUrl);
+      if (canUseAppScheme) {
+        await Linking.openURL(primaryUrl);
+        return;
+      }
+      await Linking.openURL(fallbackUrl);
+    } catch {
+      Alert.alert(
+        'WhatsApp Unavailable',
+        'Could not open WhatsApp on this device. Install WhatsApp or share this job manually.'
+      );
+    }
+  };
+
   const submitJob = async () => {
     const { title, description, cropType, taskType, pay, payPeriod, location, duration } = form;
     if (!title || !taskType || !pay || !location) {
@@ -98,7 +138,7 @@ export default function FarmerJobsScreen() {
     }
     setSubmitting(true);
     try {
-      await createJob(user.uid, userProfile?.name || 'Farmer', {
+      const postedJob = {
         title,
         description,
         cropType,
@@ -107,10 +147,18 @@ export default function FarmerJobsScreen() {
         payPeriod,
         location,
         duration,
-      });
+      };
+      await createJob(user.uid, userProfile?.name || 'Farmer', postedJob);
       setShowModal(false);
       resetForm();
-      Alert.alert('Job Posted!', 'Contractors can now see and apply for your job.');
+      Alert.alert(
+        'Job Posted!',
+        'Contractors can now see and apply for your job. Do you want to share it to WhatsApp now?',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Share to WhatsApp', onPress: () => shareJobToWhatsApp(postedJob) },
+        ]
+      );
       load();
     } catch (err) {
       Alert.alert('Error', err.message);

@@ -11,7 +11,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import MapView, { Marker, Polygon } from 'react-native-maps';
+import MapView, { Marker, Polygon, Circle, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -43,6 +43,13 @@ const CROPS = [
 ];
 
 const STEPS = ['Draw Farm', 'Select Crop', 'AI Plan', 'Review & Save'];
+const PLOT_ANALYSIS_STEPS = [
+  'Reading boundary geometry',
+  'Estimating soil and drainage profile',
+  'Checking local weather patterns',
+  'Scoring planting suitability',
+  'Preparing optimization hints',
+];
 
 function sanitizePlainText(value) {
   if (!value) return '';
@@ -255,6 +262,10 @@ export default function PlantScreen() {
   const [currentTaskIdx, setCurrentTaskIdx] = useState(0);
   const taskOpacity = useRef(new Animated.Value(1)).current;
   const taskTranslateY = useRef(new Animated.Value(0)).current;
+  const [isAnalyzingPlot, setIsAnalyzingPlot] = useState(false);
+  const [analysisStepIdx, setAnalysisStepIdx] = useState(0);
+  const [analysisTick, setAnalysisTick] = useState(0);
+  const scanPulse = useRef(new Animated.Value(0)).current;
 
   const farmCenter =
     farmBoundary.length > 0
@@ -351,6 +362,38 @@ export default function PlantScreen() {
     ]).start();
   }, [boundedTaskIdx]);
 
+  useEffect(() => {
+    if (!isAnalyzingPlot) {
+      scanPulse.stopAnimation();
+      scanPulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanPulse, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanPulse, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isAnalyzingPlot]);
+
+  useEffect(() => {
+    if (!isAnalyzingPlot) return;
+    const id = setInterval(() => setAnalysisTick((v) => v + 1), 120);
+    return () => clearInterval(id);
+  }, [isAnalyzingPlot]);
+
   // Fit map to show all boundary points so the last numbered corner is visible.
   // Only fit when the new point is outside the current view (or first point) to avoid delay on tap.
   useEffect(() => {
@@ -404,11 +447,20 @@ export default function PlantScreen() {
     ]);
   };
 
-  const proceedToStep2 = () => {
+  const proceedToStep2 = async () => {
     if (farmBoundary.length < 3) {
       Alert.alert('Draw Your Farm', 'Please tap at least 3 points on the map to outline your farm boundary.');
       return;
     }
+    setIsAnalyzingPlot(true);
+    setAnalysisStepIdx(0);
+    for (let i = 0; i < PLOT_ANALYSIS_STEPS.length; i += 1) {
+      setAnalysisStepIdx(i);
+      // Progressive analysis reveal to make the transition feel intentional.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, i === PLOT_ANALYSIS_STEPS.length - 1 ? 800 : 620));
+    }
+    setIsAnalyzingPlot(false);
     setStep(1);
   };
 
@@ -508,6 +560,25 @@ export default function PlantScreen() {
 
   // Step 0: Map Drawing
   if (step === 0) {
+    const analysisProgress = Math.min(1, (analysisStepIdx + 1) / PLOT_ANALYSIS_STEPS.length);
+    const boundaryQuality =
+      farmBoundary.length >= 6 ? 'High detail' : farmBoundary.length >= 4 ? 'Good' : 'Basic';
+    const pulse = (Math.sin((analysisTick / 2.2) % (Math.PI * 2)) + 1) / 2;
+    const scanPoint =
+      isAnalyzingPlot && orderedBoundary.length > 0
+        ? orderedBoundary[analysisTick % orderedBoundary.length]
+        : null;
+    const dynamicFillAlpha = isAnalyzingPlot ? 0.16 + pulse * 0.22 : 0.2;
+    const dynamicStrokeWidth = isAnalyzingPlot ? 2 + pulse * 2.2 : 2;
+    const scanRadius = isAnalyzingPlot ? 28 + pulse * 18 : 22;
+    const scanPath =
+      isAnalyzingPlot && scanPoint && farmCenter
+        ? [
+            { latitude: farmCenter.lat, longitude: farmCenter.lon },
+            scanPoint,
+          ]
+        : null;
+
     return (
       <View style={{ flex: 1 }}>
         <StepIndicator />
@@ -527,7 +598,7 @@ export default function PlantScreen() {
           style={{ flex: 1 }}
           region={region}
           onRegionChangeComplete={setRegion}
-          onPress={handleMapPress}
+          onPress={isAnalyzingPlot ? undefined : handleMapPress}
           onMapReady={() => setMapReady(true)}
           showsUserLocation
           showsMyLocationButton={false}
@@ -546,37 +617,97 @@ export default function PlantScreen() {
           {orderedBoundary.length >= 3 && (
             <Polygon
               coordinates={orderedBoundary}
-              fillColor="rgba(46,125,50,0.2)"
+              fillColor={`rgba(46,125,50,${dynamicFillAlpha.toFixed(3)})`}
               strokeColor={colors.primary}
-              strokeWidth={2}
+              strokeWidth={dynamicStrokeWidth}
             />
+          )}
+          {isAnalyzingPlot && farmCenter && (
+            <Circle
+              center={{ latitude: farmCenter.lat, longitude: farmCenter.lon }}
+              radius={scanRadius}
+              fillColor="rgba(76,175,80,0.15)"
+              strokeColor="rgba(27,94,32,0.35)"
+              strokeWidth={1.2}
+            />
+          )}
+          {scanPath && (
+            <Polyline
+              coordinates={scanPath}
+              strokeColor="rgba(33,150,243,0.7)"
+              strokeWidth={2}
+              lineDashPattern={[6, 6]}
+            />
+          )}
+          {scanPoint && (
+            <Marker coordinate={scanPoint} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={styles.scanMarker}>
+                <Ionicons name="scan-circle-outline" size={18} color="#fff" />
+              </View>
+            </Marker>
           )}
         </MapView>
 
         {/* Map controls */}
         <View style={styles.mapControls}>
-          <TouchableOpacity style={styles.mapControlBtn} onPress={goToCurrentLocation}>
+          <TouchableOpacity style={styles.mapControlBtn} onPress={goToCurrentLocation} disabled={isAnalyzingPlot}>
             <Ionicons name="locate" size={22} color={colors.primary} />
           </TouchableOpacity>
           {farmBoundary.length > 0 && (
-            <TouchableOpacity style={styles.mapControlBtn} onPress={undoLastPoint}>
+            <TouchableOpacity style={styles.mapControlBtn} onPress={undoLastPoint} disabled={isAnalyzingPlot}>
               <Ionicons name="arrow-undo" size={22} color={colors.warning} />
             </TouchableOpacity>
           )}
           {farmBoundary.length > 0 && (
-            <TouchableOpacity style={styles.mapControlBtn} onPress={clearBoundary}>
+            <TouchableOpacity style={styles.mapControlBtn} onPress={clearBoundary} disabled={isAnalyzingPlot}>
               <Ionicons name="trash-outline" size={22} color={colors.error} />
             </TouchableOpacity>
           )}
         </View>
+        {isAnalyzingPlot && (
+          <View style={styles.analysisOverlay} pointerEvents="none">
+            <Animated.View
+              style={[
+                styles.scanRingOuter,
+                {
+                  opacity: scanPulse.interpolate({ inputRange: [0, 1], outputRange: [0.26, 0.05] }),
+                  transform: [{ scale: scanPulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.18] }) }],
+                },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.scanRingInner,
+                {
+                  opacity: scanPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.12] }),
+                  transform: [{ scale: scanPulse.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1.1] }) }],
+                },
+              ]}
+            />
+              <View style={styles.analysisCard}>
+              <View style={styles.analysisHeader}>
+                <Ionicons name="analytics-outline" size={18} color={colors.primaryDark} />
+                <Text style={styles.analysisTitle}>Analyzing Plot</Text>
+              </View>
+              <Text style={styles.analysisSubtitle}>{PLOT_ANALYSIS_STEPS[analysisStepIdx]}</Text>
+              <View style={styles.analysisTrack}>
+                <View style={[styles.analysisFill, { width: `${Math.round(analysisProgress * 100)}%` }]} />
+              </View>
+              <View style={styles.analysisMetaRow}>
+                <Text style={styles.analysisMetaText}>Area: {farmArea.toFixed(2)} ha</Text>
+                <Text style={styles.analysisMetaText}>Boundary: {boundaryQuality}</Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         <View style={styles.stepFooter}>
           <TouchableOpacity
             style={[styles.nextBtn, farmBoundary.length < 3 && styles.nextBtnDisabled]}
             onPress={proceedToStep2}
-            disabled={farmBoundary.length < 3}
+            disabled={farmBoundary.length < 3 || isAnalyzingPlot}
           >
-            <Text style={styles.nextBtnText}>Next: Select Crop</Text>
+            <Text style={styles.nextBtnText}>{isAnalyzingPlot ? 'Analyzing...' : 'Next: Select Crop'}</Text>
             <Ionicons name="arrow-forward" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -1015,6 +1146,17 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   mapMarkerText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  scanMarker: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.info,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
   mapControls: {
     position: 'absolute',
     right: spacing.md,
@@ -1030,6 +1172,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadow.md,
   },
+  analysisOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,20,10,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  scanRingOuter: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 2,
+    borderColor: colors.primaryLighter,
+    backgroundColor: 'rgba(76,175,80,0.12)',
+  },
+  scanRingInner: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    borderWidth: 1.5,
+    borderColor: '#C8E6C9',
+    backgroundColor: 'rgba(165,214,167,0.20)',
+  },
+  analysisCard: {
+    width: '92%',
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primaryLighter,
+    ...shadow.md,
+  },
+  analysisHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  analysisTitle: { ...typography.h4, color: colors.primaryDark },
+  analysisSubtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: spacing.sm },
+  analysisTrack: {
+    width: '100%',
+    height: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  analysisFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
+  analysisMetaRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  analysisMetaText: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
 
   stepTitle: {
     ...typography.h3,
