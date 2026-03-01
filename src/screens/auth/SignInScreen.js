@@ -70,7 +70,7 @@ export default function SignInScreen({ navigation }) {
         >
           <Text style={styles.logo}>🌿</Text>
           <Text style={styles.appName}>AgriMarket</Text>
-          <Text style={styles.tagline}>Connecting farmers, contractors & buyers</Text>
+          <Text style={styles.tagline}>Connecting African farms to African futures.</Text>
         </LinearGradient>
 
         <View style={styles.form}>
